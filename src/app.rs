@@ -7,6 +7,7 @@ use eframe::egui;
 use tokio::runtime::Runtime;
 use tokio_util::sync::CancellationToken;
 
+use crate::device_query::opengl;
 use crate::device_query::vulkan::{self, GpuRuntimeStats};
 use crate::device_query::{DEFAULT_MODULE_TIMEOUT, HardwareSnapshot, QueryOptions, collect_all};
 use crate::export::{self, ExportFormat};
@@ -223,6 +224,29 @@ impl DeviceViewerApp {
                 Err(TryRecvError::Disconnected) => break,
             }
         }
+    }
+
+    /// Fills the OpenGL section from eframe's live glow context.
+    ///
+    /// The background collector has no rendering context, so it can only mark
+    /// the section as unavailable. The GUI render thread does own one, and
+    /// this is the only place where querying `GL_VENDOR`/`GL_RENDERER` is
+    /// valid. It runs once per collection result and is a no-op afterwards.
+    fn refresh_opengl(&mut self, frame: &eframe::Frame) {
+        if self
+            .state
+            .snapshot
+            .opengl
+            .as_ref()
+            .is_some_and(|info| info.available)
+        {
+            return;
+        }
+        let Some(gl) = frame.gl() else {
+            return;
+        };
+        self.state.snapshot.opengl = Some(opengl::query_from_context(gl));
+        log::info("OpenGL identity captured from the rendering context");
     }
 
     fn open_export(&mut self) {
@@ -495,12 +519,13 @@ impl DeviceViewerApp {
 }
 
 impl eframe::App for DeviceViewerApp {
-    fn ui(&mut self, ui: &mut egui::Ui, _frame: &mut eframe::Frame) {
+    fn ui(&mut self, ui: &mut egui::Ui, frame: &mut eframe::Frame) {
         let ctx = ui.ctx().clone();
         self.i18n.set_language(self.state.settings.language);
         self.apply_theme(&ctx);
         self.poll_events();
         self.poll_gpu();
+        self.refresh_opengl(frame);
 
         if self.state.ui.request_refresh {
             self.state.ui.request_refresh = false;

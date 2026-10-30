@@ -30,7 +30,6 @@ pub struct OpenGlInfo {
 /// Must run on the thread that owns the OpenGL context. Kept as the public
 /// entry point for the render thread even though the headless collector cannot
 /// create a context by itself.
-#[allow(dead_code)]
 pub fn query_from_context(gl: &glow::Context) -> OpenGlInfo {
     let mut info = OpenGlInfo {
         available: true,
@@ -44,11 +43,27 @@ pub fn query_from_context(gl: &glow::Context) -> OpenGlInfo {
         info.shading_language_version =
             Some(gl.get_parameter_string(glow::SHADING_LANGUAGE_VERSION));
         info.max_texture_size = Some(gl.get_parameter_i32(glow::MAX_TEXTURE_SIZE));
-        info.extensions = gl
-            .get_parameter_string(glow::EXTENSIONS)
-            .split_whitespace()
-            .map(str::to_string)
-            .collect();
+
+        // Core profiles removed the monolithic GL_EXTENSIONS string. Query the
+        // indexed list on OpenGL 3.0+, and keep the legacy path for 2.x.
+        let major = info
+            .version
+            .as_deref()
+            .and_then(|version| version.split('.').next())
+            .and_then(|major| major.parse::<u32>().ok())
+            .unwrap_or(3);
+        if major >= 3 {
+            let count = gl.get_parameter_i32(glow::NUM_EXTENSIONS).max(0);
+            info.extensions = (0..count)
+                .map(|index| gl.get_parameter_indexed_string(glow::EXTENSIONS, index as u32))
+                .collect();
+        } else {
+            info.extensions = gl
+                .get_parameter_string(glow::EXTENSIONS)
+                .split_whitespace()
+                .map(str::to_string)
+                .collect();
+        }
 
         let limits = [
             ("MAX_TEXTURE_SIZE", glow::MAX_TEXTURE_SIZE),

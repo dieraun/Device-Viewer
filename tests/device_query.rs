@@ -16,7 +16,7 @@ use tokio_util::sync::CancellationToken;
 #[test]
 fn package_metadata_is_stable() {
     assert_eq!(env!("CARGO_PKG_NAME"), "device-viewer");
-    assert_eq!(env!("CARGO_PKG_VERSION"), "1.0.0");
+    assert_eq!(env!("CARGO_PKG_VERSION"), "1.0.1");
 }
 
 #[test]
