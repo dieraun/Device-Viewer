@@ -330,10 +330,18 @@ jobs:
         run: |
           set -euo pipefail
           ls -l release-assets
+          notes="RELEASE_NOTES_${TAG#v}.md"
+          notes_args=(--generate-notes)
+          if [[ -f "${notes}" ]]; then
+            notes_args=(--notes-file "${notes}")
+          fi
           if gh release view "${TAG}" >/dev/null 2>&1; then
             gh release upload "${TAG}" release-assets/* --clobber
+            if [[ -f "${notes}" ]]; then
+              gh release edit "${TAG}" --notes-file "${notes}"
+            fi
           else
             gh release create "${TAG}" release-assets/* \
               --title "Device Viewer ${TAG#v}" \
-              --generate-notes
+              "${notes_args[@]}"
           fi

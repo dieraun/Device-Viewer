@@ -603,7 +603,7 @@ GitHub 会在新建 Issue/PR 时显示 `CONTRIBUTING.md` 链接；如未显示�
 
    ```toml
    [package]
-   version = "0.1.0"
+   version = "1.0.0"
    ```
 
 3. 如版本变化影响文档，更新 `README.md`、`packaging/README_PACKAGE.md`；
@@ -631,7 +631,7 @@ GitHub 会在新建 Issue/PR 时显示 `CONTRIBUTING.md` 链接；如未显示�
 
    ```powershell
    git add Cargo.toml Cargo.lock README.md packaging/
-   git commit -m "chore: prepare v0.1.0 release"
+   git commit -m "chore: prepare v1.0.0 release"
    git push origin main
    ```
 
@@ -640,8 +640,8 @@ GitHub 会在新建 Issue/PR 时显示 `CONTRIBUTING.md` 链接；如未显示�
 ### 7.2 创建并推送标签
 
 ```powershell
-git tag -a v0.1.0 -m "Device Viewer v0.1.0"
-git push origin v0.1.0
+git tag -a v1.0.0 -m "Device Viewer v1.0.0"
+git push origin v1.0.0
 ```
 
 标签必须：
@@ -673,14 +673,14 @@ git push origin v0.1.0
 
 发布完成后，在 **Releases** 页面确认：
 
-- `DeviceViewer-windows-x86_64-0.1.0.zip`
-- `DeviceViewer-windows-x86_64-0.1.0.zip.sha256`
-- `DeviceViewer-macos-x86_64-0.1.0.zip`
-- `DeviceViewer-macos-x86_64-0.1.0.zip.sha256`
-- `DeviceViewer-macos-aarch64-0.1.0.zip`
-- `DeviceViewer-macos-aarch64-0.1.0.zip.sha256`
-- `DeviceViewer-linux-x86_64-0.1.0.tar.gz`
-- `DeviceViewer-linux-x86_64-0.1.0.tar.gz.sha256`
+- `DeviceViewer-windows-x86_64-1.0.0.zip`
+- `DeviceViewer-windows-x86_64-1.0.0.zip.sha256`
+- `DeviceViewer-macos-x86_64-1.0.0.zip`
+- `DeviceViewer-macos-x86_64-1.0.0.zip.sha256`
+- `DeviceViewer-macos-aarch64-1.0.0.zip`
+- `DeviceViewer-macos-aarch64-1.0.0.zip.sha256`
+- `DeviceViewer-linux-x86_64-1.0.0.tar.gz`
+- `DeviceViewer-linux-x86_64-1.0.0.tar.gz.sha256`
 
 每个归档必须包含：
 
@@ -696,22 +696,22 @@ macOS 归档还应包含 `SIGNING_AND_NOTARIZATION.txt`。
 ### 7.5 下载并校验
 
 ```powershell
-gh release download v0.1.0 --dir .\release-check
-Get-FileHash .\release-check\DeviceViewer-windows-x86_64-0.1.0.zip -Algorithm SHA256
-Get-Content .\release-check\DeviceViewer-windows-x86_64-0.1.0.zip.sha256
+gh release download v1.0.0 --dir .\release-check
+Get-FileHash .\release-check\DeviceViewer-windows-x86_64-1.0.0.zip -Algorithm SHA256
+Get-Content .\release-check\DeviceViewer-windows-x86_64-1.0.0.zip.sha256
 ```
 
 Linux：
 
 ```bash
-sha256sum -c DeviceViewer-linux-x86_64-0.1.0.tar.gz.sha256
-tar -tzf DeviceViewer-linux-x86_64-0.1.0.tar.gz
+sha256sum -c DeviceViewer-linux-x86_64-1.0.0.tar.gz.sha256
+tar -tzf DeviceViewer-linux-x86_64-1.0.0.tar.gz
 ```
 
 macOS：
 
 ```bash
-shasum -a 256 -c DeviceViewer-macos-aarch64-0.1.0.zip.sha256
+shasum -a 256 -c DeviceViewer-macos-aarch64-1.0.0.zip.sha256
 ```
 
 ### 7.6 手动触发工作流
@@ -722,13 +722,13 @@ shasum -a 256 -c DeviceViewer-macos-aarch64-0.1.0.zip.sha256
 - 需要在同一 commit 上重跑打包；
 - `publish` 失败但构建 artifact 已成功。
 
-在 `tag` 输入框填写**已存在的标签**，例如 `v0.1.0`。
+在 `tag` 输入框填写**已存在的标签**，例如 `v1.0.0`。
 
 > **注意：** `workflow_dispatch` 的 `github.ref` 通常是分支，不是标签。构建 job 会检出分支 HEAD。手动触发前必须确认：
 >
 > ```powershell
 > git rev-parse main
-> git rev-parse v0.1.0^{commit}
+> git rev-parse v1.0.0^{commit}
 > ```
 >
 > 两者必须相同，否则产物可能不对应标签。更安全的做法是：在失败的那次标签运行中点击 **Re-run jobs**，而不是重新 dispatch。
@@ -743,10 +743,10 @@ shasum -a 256 -c DeviceViewer-macos-aarch64-0.1.0.zip.sha256
 4. 删除旧标签并重新打标签（仅限尚未发布 Release 时）：
 
    ```powershell
-   git tag -d v0.1.0
-   git push origin :refs/tags/v0.1.0
-   git tag -a v0.1.0 -m "Device Viewer v0.1.0"
-   git push origin v0.1.0
+   git tag -d v1.0.0
+   git push origin :refs/tags/v1.0.0
+   git tag -a v1.0.0 -m "Device Viewer v1.0.0"
+   git push origin v1.0.0
    ```
 
    如标签规则集禁止删除，需要维护者临时 bypass，操作后立即恢复保护。
@@ -855,7 +855,7 @@ git push --force-with-lease origin main
 检查：
 
 - 标签是否以 `v` 开头；
-- 是否执行了 `git push origin v0.1.0`，而不是只创建本地标签；
+- 是否执行了 `git push origin v1.0.0`，而不是只创建本地标签；
 - **Settings → Actions → General** 是否禁用了 Actions；
 - 工作流文件是否在默认分支上存在；
 - YAML 是否缩进错误。
@@ -902,10 +902,10 @@ xattr -dr com.apple.quarantine DeviceViewer
 未发布 Release 时：
 
 ```powershell
-git tag -d v0.1.0
-git push origin :refs/tags/v0.1.0
-git tag -a v0.1.0 -m "Device Viewer v0.1.0"
-git push origin v0.1.0
+git tag -d v1.0.0
+git push origin :refs/tags/v1.0.0
+git tag -a v1.0.0 -m "Device Viewer v1.0.0"
+git push origin v1.0.0
 ```
 
 已发布 Release 时：不要移动标签，发布新的补丁版本。
