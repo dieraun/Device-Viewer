@@ -1,0 +1,126 @@
+# =============================================================================
+# Device Viewer — Git ignore rules
+# =============================================================================
+# This file is intentionally conservative. Never force-add ignored files that
+# contain credentials, private keys, user hardware data, or local snapshots.
+#
+# Cargo.lock is intentionally NOT ignored. Device Viewer is an application
+# binary, so Cargo.lock must be committed for reproducible release builds.
+# =============================================================================
+
+# -----------------------------------------------------------------------------
+# Rust / Cargo build output
+# -----------------------------------------------------------------------------
+target/
+**/target/
+**/*.rs.bk
+*.pdb
+*.ilk
+*.dSYM/
+*.dSYM
+*.profraw
+*.profdata
+*.gcda
+*.gcno
+*.gcov
+/cargo-timings/
+/cargo-timing.html
+/flamegraph.svg
+/perf.data
+/perf.data.*
+
+# -----------------------------------------------------------------------------
+# Local package and release staging
+# -----------------------------------------------------------------------------
+/dist/
+/artifacts/
+/release/
+/out/
+*.zip
+*.tar.gz
+*.tar.zst
+*.7z
+*.sha256
+
+# -----------------------------------------------------------------------------
+# Device Viewer local runtime data
+# -----------------------------------------------------------------------------
+# Local portable configuration (never commit machine-specific settings).
+/device-viewer.json
+/device-viewer.log
+*.log
+*.log.*
+/logs/
+
+# Local snapshots and comparison data may contain hostnames, serial numbers,
+# MAC addresses, IP addresses, and other device identifiers.
+/snapshots/
+*.dvsnap
+
+# Local user data / scratch space
+/scratch/
+/tmp/
+*.tmp
+*.temp
+*.bak
+*.orig
+*.rej
+*~
+.~lock.*#
+
+# -----------------------------------------------------------------------------
+# Environment variables, credentials, and signing material
+# -----------------------------------------------------------------------------
+.env
+.env.*
+!.env.example
+*.pem
+*.key
+*.p12
+*.pfx
+*.jks
+*.keystore
+secrets/
+.secrets/
+
+# -----------------------------------------------------------------------------
+# IDE / editor metadata
+# -----------------------------------------------------------------------------
+.idea/
+*.iml
+.vscode/
+.fleet/
+.zed/
+.project
+.classpath
+.settings/
+*.swp
+*.swo
+*.sublime-workspace
+*.sublime-project
+
+# -----------------------------------------------------------------------------
+# Operating system metadata
+# -----------------------------------------------------------------------------
+.DS_Store
+._*
+Thumbs.db
+ehthumbs.db
+Desktop.ini
+$RECYCLE.BIN/
+
+# -----------------------------------------------------------------------------
+# Test / coverage output
+# -----------------------------------------------------------------------------
+/coverage/
+/lcov.info
+/tarpaulin-report.*
+/nextest/
+*.snap.new
+
+# -----------------------------------------------------------------------------
+# Temporary editor and tool files
+# -----------------------------------------------------------------------------
+*.crdownload
+*.part
+*.partial
