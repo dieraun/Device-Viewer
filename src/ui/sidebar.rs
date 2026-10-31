@@ -36,7 +36,14 @@ const GROUPS: [(&str, &[Page]); 4] = [
     ),
     (
         "app.tools",
-        &[Page::Dev, Page::Snapshots, Page::Compare, Page::Settings],
+        &[
+            Page::Dev,
+            Page::Snapshots,
+            Page::Compare,
+            Page::Updates,
+            Page::About,
+            Page::Settings,
+        ],
     ),
 ];
 
@@ -52,7 +59,12 @@ pub fn show(ui: &mut egui::Ui, state: &mut AppState, i18n: I18n) {
     ui.add_space(8.0);
     ui.separator();
 
+    // Keep the footer (version, warnings) outside the scroll viewport. Without
+    // this bound the scroll area consumes all remaining height and the last
+    // navigation entries overlap the footer, making About/Settings unreachable.
+    let scroll_height = (ui.available_height() - 78.0).max(120.0);
     egui::ScrollArea::vertical()
+        .max_height(scroll_height)
         .auto_shrink([false, false])
         .show(ui, |ui| {
             for (group, pages) in GROUPS {

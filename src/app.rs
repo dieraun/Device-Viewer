@@ -1,9 +1,11 @@
 //! eframe application shell: startup collection, navigation, toolbar and export.
 
+use std::cmp::Ordering;
 use std::sync::mpsc::{Receiver, TryRecvError};
 use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 
 use eframe::egui;
+use serde::Deserialize;
 use tokio::runtime::Runtime;
 use tokio_util::sync::CancellationToken;
 
@@ -13,8 +15,11 @@ use crate::device_query::{DEFAULT_MODULE_TIMEOUT, HardwareSnapshot, QueryOptions
 use crate::export::{self, ExportFormat};
 use crate::i18n::{self, I18n};
 use crate::log;
-use crate::state::AppState;
+use crate::state::{AppState, ThemeMode, UpdateReport, UpdateState};
 use crate::ui;
+
+const UPDATE_ENDPOINT: &str = "https://api.github.com/repos/dieraun/Device-Viewer/releases";
+const UPDATE_USER_AGENT: &str = "device-viewer";
 
 enum QueryEvent {
     Snapshot {
@@ -28,6 +33,10 @@ enum QueryEvent {
     GpuFailed {
         generation: u64,
         message: String,
+    },
+    Update {
+        generation: u64,
+        result: Result<UpdateReport, String>,
     },
 }
 
@@ -54,6 +63,7 @@ pub struct DeviceViewerApp {
     cancel: CancellationToken,
     gpu_cancel: CancellationToken,
     generation: u64,
+    update_generation: u64,
     busy: bool,
     started: Instant,
     gpu_inflight: bool,
@@ -63,7 +73,7 @@ pub struct DeviceViewerApp {
     export_format: ExportFormat,
     export_preview: String,
     startup_error: Option<String>,
-    applied_theme: Option<bool>,
+    applied_theme: Option<egui::ThemePreference>,
     last_window_rect: Option<[f32; 4]>,
 }
 
@@ -92,6 +102,7 @@ impl DeviceViewerApp {
             cancel: CancellationToken::new(),
             gpu_cancel: CancellationToken::new(),
             generation: 0,
+            update_generation: 0,
             busy: false,
             started: Instant::now(),
             gpu_inflight: false,
@@ -106,18 +117,21 @@ impl DeviceViewerApp {
         };
         app.apply_theme(&creation.egui_ctx);
         app.start_query();
+        if app.state.settings.auto_check_updates {
+            app.start_update_check();
+        }
         app
     }
 
     fn apply_theme(&mut self, ctx: &egui::Context) {
-        let dark = self.state.settings.dark;
-        if self.applied_theme != Some(dark) {
-            ctx.set_visuals(if dark {
-                egui::Visuals::dark()
-            } else {
-                egui::Visuals::light()
-            });
-            self.applied_theme = Some(dark);
+        let preference = match self.state.settings.theme {
+            ThemeMode::System => egui::ThemePreference::System,
+            ThemeMode::Dark => egui::ThemePreference::Dark,
+            ThemeMode::Light => egui::ThemePreference::Light,
+        };
+        if self.applied_theme != Some(preference) {
+            ctx.set_theme(preference);
+            self.applied_theme = Some(preference);
         }
     }
 
@@ -146,6 +160,27 @@ impl DeviceViewerApp {
                 generation,
                 snapshot,
             });
+        });
+    }
+
+    fn start_update_check(&mut self) {
+        if self.state.update.is_checking() {
+            return;
+        }
+        self.update_generation = self.update_generation.wrapping_add(1);
+        let generation = self.update_generation;
+        let current = env!("CARGO_PKG_VERSION").to_string();
+        let include_prerelease = self.state.settings.include_prerelease;
+        self.state.update = UpdateState::Checking;
+        let Some(runtime) = &self.runtime else {
+            self.state.update = UpdateState::Failed("the async runtime is unavailable".to_string());
+            log::warn("update check skipped: async runtime is unavailable");
+            return;
+        };
+        let sender = self.sender.clone();
+        runtime.spawn_blocking(move || {
+            let result = check_for_update(&current, include_prerelease);
+            let _ = sender.send(QueryEvent::Update { generation, result });
         });
     }
 
@@ -219,6 +254,24 @@ impl DeviceViewerApp {
                     }
                     self.gpu_inflight = false;
                     log::warn(format!("live GPU sampling failed: {message}"));
+                }
+                Ok(QueryEvent::Update { generation, result }) => {
+                    if generation != self.update_generation {
+                        continue;
+                    }
+                    match result {
+                        Ok(report) => {
+                            log::info(format!(
+                                "update check: current={} latest={} available={} prerelease={}",
+                                report.current, report.latest, report.available, report.prerelease
+                            ));
+                            self.state.update = UpdateState::Ready(report);
+                        }
+                        Err(message) => {
+                            log::warn(format!("update check failed: {message}"));
+                            self.state.update = UpdateState::Failed(message);
+                        }
+                    }
                 }
                 Err(TryRecvError::Empty) => break,
                 Err(TryRecvError::Disconnected) => break,
@@ -312,19 +365,23 @@ impl DeviceViewerApp {
             {
                 self.open_export();
             }
-            if ui.button(self.i18n.t("app.language")).clicked() {
-                self.state.settings.language = self.state.settings.language.toggle();
-                self.state.mark_dirty();
-            }
+            let language_label = self.i18n.t(self.state.settings.language.label_key());
             if ui
-                .button(if self.state.settings.dark {
-                    "☾"
-                } else {
-                    "☀"
-                })
+                .button(language_label)
+                .on_hover_text(self.i18n.t("settings.language_hint"))
                 .clicked()
             {
-                self.state.settings.dark = !self.state.settings.dark;
+                self.state.settings.language = self.state.settings.language.cycle();
+                self.state.mark_dirty();
+            }
+            let theme = self.state.settings.theme;
+            if ui
+                .button(theme.icon())
+                .on_hover_text(self.i18n.t(theme.label_key()))
+                .clicked()
+            {
+                self.state.settings.theme = theme.cycle();
+                self.state.settings.dark = None;
                 self.state.mark_dirty();
             }
             if self.busy {
@@ -521,7 +578,7 @@ impl DeviceViewerApp {
 impl eframe::App for DeviceViewerApp {
     fn ui(&mut self, ui: &mut egui::Ui, frame: &mut eframe::Frame) {
         let ctx = ui.ctx().clone();
-        self.i18n.set_language(self.state.settings.language);
+        self.i18n.set_preference(self.state.settings.language);
         self.apply_theme(&ctx);
         self.poll_events();
         self.poll_gpu();
@@ -530,6 +587,10 @@ impl eframe::App for DeviceViewerApp {
         if self.state.ui.request_refresh {
             self.state.ui.request_refresh = false;
             self.start_query();
+        }
+        if self.state.ui.request_update_check {
+            self.state.ui.request_update_check = false;
+            self.start_update_check();
         }
 
         if self.state.snapshot.captured_at_unix_ms == 0 && self.busy {
@@ -569,5 +630,247 @@ impl eframe::App for DeviceViewerApp {
         if let Some(runtime) = self.runtime.take() {
             runtime.shutdown_timeout(Duration::from_secs(2));
         }
+    }
+}
+
+#[derive(Debug, Deserialize)]
+struct ReleaseDto {
+    tag_name: String,
+    html_url: String,
+    #[serde(default)]
+    name: Option<String>,
+    #[serde(default)]
+    prerelease: bool,
+    #[serde(default)]
+    draft: bool,
+    #[serde(default)]
+    published_at: Option<String>,
+}
+
+#[derive(Debug)]
+struct Release {
+    tag: String,
+    version: Version,
+    name: String,
+    url: String,
+    prerelease: bool,
+    published_at: Option<String>,
+}
+
+impl Release {
+    fn from_dto(dto: ReleaseDto) -> Option<Self> {
+        if dto.draft || dto.tag_name.trim().is_empty() {
+            return None;
+        }
+        let version = parse_version(&dto.tag_name)?;
+        let tag = dto.tag_name.trim().to_string();
+        Some(Self {
+            name: dto
+                .name
+                .filter(|name| !name.trim().is_empty())
+                .unwrap_or_else(|| tag.clone()),
+            version,
+            url: if dto.html_url.trim().is_empty() {
+                format!("https://github.com/dieraun/Device-Viewer/releases/tag/{tag}")
+            } else {
+                dto.html_url
+            },
+            prerelease: dto.prerelease,
+            published_at: dto.published_at,
+            tag,
+        })
+    }
+}
+
+#[derive(Debug, Clone, Eq, PartialEq)]
+struct Version {
+    numbers: Vec<u64>,
+    pre: Option<String>,
+}
+
+fn parse_version(value: &str) -> Option<Version> {
+    let value = value.trim();
+    let value = value
+        .strip_prefix('v')
+        .or_else(|| value.strip_prefix('V'))
+        .unwrap_or(value);
+    let value = value.split('+').next().unwrap_or(value);
+    let (core, pre) = match value.split_once('-') {
+        Some((core, pre)) if !pre.is_empty() => (core, Some(pre.to_ascii_lowercase())),
+        Some((core, _)) => (core, None),
+        None => (value, None),
+    };
+    let numbers = core
+        .split('.')
+        .map(|part| part.parse::<u64>().ok())
+        .collect::<Option<Vec<_>>>()?;
+    if numbers.is_empty() {
+        return None;
+    }
+    Some(Version { numbers, pre })
+}
+
+fn compare_versions(left: &Version, right: &Version) -> Ordering {
+    let len = left.numbers.len().max(right.numbers.len());
+    for index in 0..len {
+        let left = left.numbers.get(index).copied().unwrap_or(0);
+        let right = right.numbers.get(index).copied().unwrap_or(0);
+        match left.cmp(&right) {
+            Ordering::Equal => {}
+            other => return other,
+        }
+    }
+    match (&left.pre, &right.pre) {
+        (None, None) => Ordering::Equal,
+        (None, Some(_)) => Ordering::Greater,
+        (Some(_), None) => Ordering::Less,
+        (Some(left), Some(right)) => compare_pre(left, right),
+    }
+}
+
+fn compare_pre(left: &str, right: &str) -> Ordering {
+    let mut left_parts = left.split('.');
+    let mut right_parts = right.split('.');
+    loop {
+        match (left_parts.next(), right_parts.next()) {
+            (None, None) => return Ordering::Equal,
+            (None, Some(_)) => return Ordering::Less,
+            (Some(_), None) => return Ordering::Greater,
+            (Some(left), Some(right)) => match compare_identifier(left, right) {
+                Ordering::Equal => {}
+                other => return other,
+            },
+        }
+    }
+}
+
+fn compare_identifier(left: &str, right: &str) -> Ordering {
+    match (left.parse::<u64>(), right.parse::<u64>()) {
+        (Ok(left), Ok(right)) => left.cmp(&right),
+        (Ok(_), Err(_)) => Ordering::Less,
+        (Err(_), Ok(_)) => Ordering::Greater,
+        (Err(_), Err(_)) => left.cmp(right),
+    }
+}
+
+fn check_for_update(current: &str, include_prerelease: bool) -> Result<UpdateReport, String> {
+    let current_version =
+        parse_version(current).ok_or_else(|| format!("invalid current version `{current}`"))?;
+    let release = if include_prerelease {
+        let releases: Vec<ReleaseDto> =
+            get_json(&format!("{UPDATE_ENDPOINT}?per_page=30"), UPDATE_USER_AGENT)?;
+        releases
+            .into_iter()
+            .filter_map(Release::from_dto)
+            .max_by(|left, right| compare_versions(&left.version, &right.version))
+            .ok_or_else(|| "no published release was found".to_string())?
+    } else {
+        let dto: ReleaseDto = get_json(&format!("{UPDATE_ENDPOINT}/latest"), UPDATE_USER_AGENT)?;
+        Release::from_dto(dto)
+            .ok_or_else(|| "the latest release has no valid version tag".to_string())?
+    };
+
+    let available = compare_versions(&release.version, &current_version) == Ordering::Greater;
+    Ok(UpdateReport {
+        current: current.to_string(),
+        latest: release.tag.trim_start_matches(['v', 'V']).to_string(),
+        tag: release.tag,
+        name: release.name,
+        url: release.url,
+        prerelease: release.prerelease,
+        available,
+        published_at: release.published_at,
+        checked_at_ms: now_ms(),
+    })
+}
+
+fn get_json<T: serde::de::DeserializeOwned>(url: &str, user_agent: &str) -> Result<T, String> {
+    let agent = ureq::AgentBuilder::new()
+        .timeout_connect(Duration::from_secs(5))
+        .timeout_read(Duration::from_secs(12))
+        .build();
+    let response = agent
+        .get(url)
+        .set("Accept", "application/vnd.github+json")
+        .set(
+            "User-Agent",
+            &format!("{user_agent}/{}", env!("CARGO_PKG_VERSION")),
+        )
+        .call();
+    match response {
+        Ok(response) => response
+            .into_string()
+            .map_err(|error| format!("could not read the GitHub response: {error}"))
+            .and_then(|body| {
+                serde_json::from_str(&body)
+                    .map_err(|error| format!("could not parse the GitHub response: {error}"))
+            }),
+        Err(ureq::Error::Status(404, _)) => {
+            Err("no published release was found for this repository".to_string())
+        }
+        Err(ureq::Error::Status(403 | 429, _)) => {
+            Err("GitHub API rate limit reached; please try again later".to_string())
+        }
+        Err(ureq::Error::Status(code, _)) => Err(format!("the GitHub API returned HTTP {code}")),
+        Err(ureq::Error::Transport(error)) => Err(format!("network request failed: {error}")),
+    }
+}
+
+fn now_ms() -> u64 {
+    SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .map(|duration| duration.as_millis().min(u64::MAX as u128) as u64)
+        .unwrap_or_default()
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn parse(value: &str) -> Version {
+        parse_version(value).expect("valid version")
+    }
+
+    #[test]
+    fn version_comparison_handles_tags_and_releases() {
+        assert_eq!(
+            compare_versions(&parse("v1.0.1"), &parse("1.0.1")),
+            Ordering::Equal
+        );
+        assert_eq!(
+            compare_versions(&parse("1.0.1"), &parse("1.0.2")),
+            Ordering::Less
+        );
+        assert_eq!(
+            compare_versions(&parse("1.0"), &parse("1.0.0")),
+            Ordering::Equal
+        );
+        assert_eq!(
+            compare_versions(&parse("1.0.0"), &parse("1.0.0-rc.1")),
+            Ordering::Greater
+        );
+    }
+
+    #[test]
+    fn version_comparison_orders_prereleases_semantically() {
+        assert_eq!(
+            compare_versions(&parse("1.0.0-alpha"), &parse("1.0.0-beta")),
+            Ordering::Less
+        );
+        assert_eq!(
+            compare_versions(&parse("1.0.0-rc.2"), &parse("1.0.0-rc.10")),
+            Ordering::Less
+        );
+        assert_eq!(
+            compare_versions(&parse("1.0.0-1"), &parse("1.0.0-alpha")),
+            Ordering::Less
+        );
+    }
+
+    #[test]
+    fn version_parser_rejects_non_versions() {
+        assert!(parse_version("latest").is_none());
+        assert!(parse_version("").is_none());
+        assert!(parse_version("v1.x.0").is_none());
     }
 }

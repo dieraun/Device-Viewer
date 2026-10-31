@@ -15,7 +15,7 @@ use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 use serde::{Deserialize, Serialize};
 
 use crate::device_query::{GpuRuntimeStats, HardwareSnapshot, UnitSystem};
-use crate::i18n::Language;
+use crate::i18n::LanguagePreference;
 
 pub const CONFIG_FILE: &str = "device-viewer.json";
 pub const LOG_FILE: &str = "device-viewer.log";
@@ -49,12 +49,14 @@ pub enum Page {
     Dev,
     Snapshots,
     Compare,
+    About,
+    Updates,
     Settings,
 }
 
 impl Page {
     #[allow(dead_code)] // useful for exhaustive navigation tests
-    pub const ALL: [Self; 21] = [
+    pub const ALL: [Self; 23] = [
         Self::Overview,
         Self::Cpu,
         Self::Pcie,
@@ -75,6 +77,8 @@ impl Page {
         Self::Dev,
         Self::Snapshots,
         Self::Compare,
+        Self::About,
+        Self::Updates,
         Self::Settings,
     ];
 
@@ -100,6 +104,8 @@ impl Page {
             Self::Dev => "nav.dev",
             Self::Snapshots => "nav.snapshots",
             Self::Compare => "nav.compare",
+            Self::About => "nav.about",
+            Self::Updates => "nav.updates",
             Self::Settings => "nav.settings",
         }
     }
@@ -127,6 +133,8 @@ impl Page {
             Self::Dev => "page.dev.sub",
             Self::Snapshots => "page.snapshots.sub",
             Self::Compare => "page.compare.sub",
+            Self::About => "page.about.sub",
+            Self::Updates => "page.updates.sub",
             Self::Settings => "page.settings.sub",
         }
     }
@@ -153,6 +161,8 @@ impl Page {
             Self::Dev => "⌨",
             Self::Snapshots => "❐",
             Self::Compare => "⇋",
+            Self::About => "ⓘ",
+            Self::Updates => "⇧",
             Self::Settings => "⚙",
         }
     }
@@ -199,31 +209,124 @@ impl Default for FilterSettings {
     }
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Default)]
+#[serde(rename_all = "lowercase")]
+pub enum ThemeMode {
+    #[default]
+    System,
+    Dark,
+    Light,
+}
+
+impl ThemeMode {
+    pub const ALL: [Self; 3] = [Self::System, Self::Dark, Self::Light];
+
+    pub const fn label_key(self) -> &'static str {
+        match self {
+            Self::System => "theme.system",
+            Self::Dark => "theme.dark",
+            Self::Light => "theme.light",
+        }
+    }
+
+    pub const fn icon(self) -> &'static str {
+        match self {
+            Self::System => "◐",
+            Self::Dark => "☾",
+            Self::Light => "☀",
+        }
+    }
+
+    pub const fn cycle(self) -> Self {
+        match self {
+            Self::System => Self::Dark,
+            Self::Dark => Self::Light,
+            Self::Light => Self::System,
+        }
+    }
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(default)]
 pub struct Settings {
-    pub language: Language,
-    pub dark: bool,
+    /// Persisted language choice; `System` is the first-launch default.
+    pub language: LanguagePreference,
+    /// Persisted theme choice; `System` is the first-launch default.
+    pub theme: ThemeMode,
+    /// Legacy boolean from versions before the System theme mode existed.
+    /// Kept only so old configuration files migrate without losing the choice.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub dark: Option<bool>,
     pub units: UnitSystem,
     pub portable: bool,
     pub page: Page,
     pub window_rect: Option<[f32; 4]>,
     pub filters: FilterSettings,
     pub favorite_extensions: Vec<String>,
+    pub auto_check_updates: bool,
+    pub include_prerelease: bool,
 }
 
 impl Default for Settings {
     fn default() -> Self {
         Self {
-            language: Language::from_system(),
-            dark: true,
+            language: LanguagePreference::System,
+            theme: ThemeMode::System,
+            dark: None,
             units: UnitSystem::Binary,
             portable: false,
             page: Page::Overview,
             window_rect: None,
             filters: FilterSettings::default(),
             favorite_extensions: Vec::new(),
+            auto_check_updates: true,
+            include_prerelease: false,
         }
+    }
+}
+
+impl Settings {
+    /// Migrates the pre-1.1 `dark: bool` field into an explicit theme choice.
+    /// A configuration written by the new version has `theme` and no `dark`,
+    /// so this is a no-op for fresh files.
+    fn normalize(&mut self) {
+        if let Some(dark) = self.dark.take()
+            && self.theme == ThemeMode::System
+        {
+            self.theme = if dark {
+                ThemeMode::Dark
+            } else {
+                ThemeMode::Light
+            };
+        }
+    }
+}
+
+#[derive(Debug, Clone)]
+pub struct UpdateReport {
+    pub current: String,
+    pub latest: String,
+    pub tag: String,
+    pub name: String,
+    pub url: String,
+    pub prerelease: bool,
+    pub available: bool,
+    pub published_at: Option<String>,
+    pub checked_at_ms: u64,
+}
+
+#[derive(Debug, Clone, Default)]
+pub enum UpdateState {
+    #[default]
+    Idle,
+    Checking,
+    Ready(UpdateReport),
+    Failed(String),
+}
+
+impl UpdateState {
+    pub fn is_checking(&self) -> bool {
+        matches!(self, Self::Checking)
     }
 }
 
@@ -313,6 +416,7 @@ pub struct UiState {
     pub tag_buffer: String,
     pub tag_edit: Option<String>,
     pub toast: Option<String>,
+    pub request_update_check: bool,
 }
 
 impl Default for UiState {
@@ -328,6 +432,7 @@ impl Default for UiState {
             tag_buffer: String::new(),
             tag_edit: None,
             toast: None,
+            request_update_check: false,
         }
     }
 }
@@ -341,6 +446,7 @@ pub struct AppState {
     pub compare_file: Option<String>,
     pub gpu_runtime: Vec<GpuRuntimeStats>,
     pub permission: PermissionReport,
+    pub update: UpdateState,
     pub ui: UiState,
     pub config_path: PathBuf,
     pub snapshots_dir: PathBuf,
@@ -373,6 +479,7 @@ impl AppState {
         } else if used_portable_file {
             config.settings.portable = true;
         }
+        config.settings.normalize();
 
         let portable = config.settings.portable;
         let mut state = Self {
@@ -384,6 +491,7 @@ impl AppState {
             compare_file: None,
             gpu_runtime: Vec::new(),
             permission: PermissionReport::detect(),
+            update: UpdateState::Idle,
             ui: UiState::default(),
             config_path: config_file(portable),
             snapshots_dir: snapshots_dir(portable),
@@ -965,5 +1073,54 @@ mod tests {
     fn timestamps_are_rendered_as_civil_dates() {
         assert_eq!(format_timestamp(0), "1970-01-01 00:00:00");
         assert_eq!(format_timestamp(3_661_000), "1970-01-01 01:01:01");
+    }
+
+    #[test]
+    fn first_launch_defaults_follow_system_and_enable_update_checks() {
+        let settings = Settings::default();
+        assert_eq!(settings.language, LanguagePreference::System);
+        assert_eq!(settings.theme, ThemeMode::System);
+        assert!(settings.dark.is_none());
+        assert!(settings.auto_check_updates);
+        assert!(!settings.include_prerelease);
+    }
+
+    #[test]
+    fn legacy_dark_choice_migrates_into_theme_mode() {
+        let mut legacy = Settings {
+            dark: Some(true),
+            ..Settings::default()
+        };
+        legacy.normalize();
+        assert_eq!(legacy.theme, ThemeMode::Dark);
+        assert!(legacy.dark.is_none());
+
+        let mut explicit = Settings {
+            dark: Some(false),
+            theme: ThemeMode::Light,
+            ..Settings::default()
+        };
+        explicit.normalize();
+        assert_eq!(explicit.theme, ThemeMode::Light);
+        assert!(explicit.dark.is_none());
+    }
+
+    #[test]
+    fn settings_round_trip_keeps_preferences() {
+        let settings = Settings {
+            language: LanguagePreference::Chinese,
+            theme: ThemeMode::Dark,
+            auto_check_updates: false,
+            include_prerelease: true,
+            ..Settings::default()
+        };
+        let encoded = serde_json::to_string(&settings).expect("settings serialize");
+        let value: serde_json::Value = serde_json::from_str(&encoded).expect("settings JSON");
+        assert!(value.get("dark").is_none());
+        let decoded: Settings = serde_json::from_str(&encoded).expect("settings deserialize");
+        assert_eq!(decoded.language, LanguagePreference::Chinese);
+        assert_eq!(decoded.theme, ThemeMode::Dark);
+        assert!(!decoded.auto_check_updates);
+        assert!(decoded.include_prerelease);
     }
 }

@@ -5,7 +5,7 @@
 //! timestamp as compile-time environment variables:
 //!
 //! `DV_BUILD_TARGET`, `DV_BUILD_PROFILE`, `DV_BUILD_VERSION`,
-//! `DV_BUILD_COMMIT`, `DV_BUILD_TIMESTAMP`.
+//! `DV_BUILD_COMMIT`, `DV_BUILD_TIMESTAMP`, `DV_RUSTC_VERSION`.
 //!
 //! The values are optional metadata; the application does not require them at
 //! runtime. `SOURCE_DATE_EPOCH` is honoured for reproducible builds.
@@ -18,6 +18,7 @@ fn main() {
     println!("cargo:rerun-if-changed=.git/HEAD");
     println!("cargo:rerun-if-env-changed=DV_BUILD_COMMIT");
     println!("cargo:rerun-if-env-changed=SOURCE_DATE_EPOCH");
+    println!("cargo:rerun-if-env-changed=RUSTC");
 
     let target = env_value("TARGET").unwrap_or_else(|| "unknown".to_string());
     let profile = env_value("PROFILE").unwrap_or_else(|| "unknown".to_string());
@@ -38,6 +39,20 @@ fn main() {
     emit("DV_BUILD_VERSION", &version);
     emit("DV_BUILD_COMMIT", &commit);
     emit("DV_BUILD_TIMESTAMP", &timestamp.to_string());
+    emit(
+        "DV_RUSTC_VERSION",
+        &rustc_version().unwrap_or_else(|| "unknown".to_string()),
+    );
+}
+
+fn rustc_version() -> Option<String> {
+    let rustc = std::env::var("RUSTC").unwrap_or_else(|_| "rustc".to_string());
+    let output = Command::new(rustc).arg("--version").output().ok()?;
+    if !output.status.success() {
+        return None;
+    }
+    let version = String::from_utf8(output.stdout).ok()?;
+    version.lines().next().map(|line| sanitize(line.trim()))
 }
 
 fn env_value(name: &str) -> Option<String> {

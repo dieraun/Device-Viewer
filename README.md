@@ -6,7 +6,7 @@ Rust · eframe/egui · 异步并行采集 · GUI + CLI · Windows / Linux / macO
 
 [🇨🇳 中文](#中文) · [🇬🇧 English](#english)
 
-**当前版本 Current release: 1.0.1** · [发行说明 Release notes](RELEASE_NOTES_1.0.1.md)
+**当前版本 Current release: 1.1.0** · [发行说明 Release notes](RELEASE_NOTES_1.1.0.md)
 
 > 本项目采用**定制化专有许可协议**，不是开源软件。个人与非营利组织可免费本地使用；任何商业用途必须事先获得作者书面授权。详见 [LICENSE](LICENSE) 与 [LEGAL_STATEMENT.md](LEGAL_STATEMENT.md)。
 

@@ -52,6 +52,8 @@ pub fn show_page(ui: &mut egui::Ui, state: &mut AppState, i18n: I18n) {
         Page::Dev => panel_dev::show(ui, state, i18n),
         Page::Snapshots => snapshot_list::show(ui, state, i18n),
         Page::Compare => snapshot_compare::show(ui, state, i18n),
+        Page::About => settings::about(ui, state, i18n),
+        Page::Updates => settings::updates(ui, state, i18n),
         Page::Settings => settings::show(ui, state, i18n),
     }
 }

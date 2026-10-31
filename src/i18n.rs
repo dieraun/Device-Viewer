@@ -17,32 +17,113 @@ pub enum Language {
 }
 
 impl Language {
-    pub const ALL: [Self; 2] = [Self::English, Self::Chinese];
-
-    pub fn label(self) -> &'static str {
-        match self {
-            Self::English => "English",
-            Self::Chinese => "简体中文",
-        }
-    }
-
-    /// Picks Chinese when the process locale asks for it, otherwise English.
+    /// Picks the operating-system language when it is Chinese or English,
+    /// otherwise falls back to the POSIX locale variables.
     pub fn from_system() -> Self {
-        for key in ["LC_ALL", "LC_MESSAGES", "LANG"] {
-            if let Ok(value) = std::env::var(key) {
-                let value = value.to_ascii_lowercase();
-                if value.starts_with("zh") || value.contains("chinese") {
-                    return Self::Chinese;
-                }
+        #[cfg(target_os = "windows")]
+        if let Some(language) = windows_language() {
+            return language;
+        }
+
+        #[cfg(target_os = "macos")]
+        if let Some(language) = macos_language() {
+            return language;
+        }
+
+        locale_language()
+    }
+}
+
+#[cfg(target_os = "windows")]
+fn windows_language() -> Option<Language> {
+    use windows::Win32::Globalization::GetUserDefaultUILanguage;
+
+    let language_id = unsafe { GetUserDefaultUILanguage() };
+    match language_id & 0x03ff {
+        0x04 => Some(Language::Chinese),
+        0x09 => Some(Language::English),
+        _ => None,
+    }
+}
+
+#[cfg(target_os = "macos")]
+fn macos_language() -> Option<Language> {
+    let output = std::process::Command::new("defaults")
+        .args(["read", "-g", "AppleLanguages"])
+        .output()
+        .ok()?;
+    if !output.status.success() {
+        return None;
+    }
+    let value = String::from_utf8_lossy(&output.stdout).to_ascii_lowercase();
+    if value.contains("zh") {
+        Some(Language::Chinese)
+    } else if value.contains("en") {
+        Some(Language::English)
+    } else {
+        None
+    }
+}
+
+fn locale_language() -> Language {
+    for key in ["LC_ALL", "LC_MESSAGES", "LANG"] {
+        if let Ok(value) = std::env::var(key) {
+            let value = value.to_ascii_lowercase();
+            if value.starts_with("zh") || value.contains("chinese") {
+                return Language::Chinese;
+            }
+            if value.starts_with("en") || value.contains("english") {
+                return Language::English;
             }
         }
-        Self::English
+    }
+    Language::English
+}
+
+/// The persisted language choice. `System` resolves on startup and can be
+/// revisited from Settings without losing the explicit English/Chinese choice.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Default)]
+#[serde(rename_all = "lowercase")]
+pub enum LanguagePreference {
+    #[default]
+    System,
+    English,
+    Chinese,
+}
+
+impl LanguagePreference {
+    pub const ALL: [Self; 3] = [Self::System, Self::English, Self::Chinese];
+
+    pub const fn label_key(self) -> &'static str {
+        match self {
+            Self::System => "language.system",
+            Self::English => "language.english",
+            Self::Chinese => "language.chinese",
+        }
     }
 
-    pub const fn toggle(self) -> Self {
+    pub fn resolve(self) -> Language {
         match self {
+            Self::System => Language::from_system(),
+            Self::English => Language::English,
+            Self::Chinese => Language::Chinese,
+        }
+    }
+
+    pub const fn cycle(self) -> Self {
+        match self {
+            Self::System => Self::English,
             Self::English => Self::Chinese,
-            Self::Chinese => Self::English,
+            Self::Chinese => Self::System,
+        }
+    }
+}
+
+impl From<Language> for LanguagePreference {
+    fn from(language: Language) -> Self {
+        match language {
+            Language::English => Self::English,
+            Language::Chinese => Self::Chinese,
         }
     }
 }
@@ -53,12 +134,17 @@ pub struct I18n {
 }
 
 impl I18n {
-    pub const fn new(language: Language) -> Self {
-        Self { language }
+    pub fn new(preference: impl Into<LanguagePreference>) -> Self {
+        Self {
+            language: preference.into().resolve(),
+        }
     }
 
-    pub fn set_language(&mut self, language: Language) {
-        self.language = language;
+    pub fn set_preference(&mut self, preference: LanguagePreference) {
+        let language = preference.resolve();
+        if self.language != language {
+            self.language = language;
+        }
     }
 
     pub fn t(self, key: &'static str) -> &'static str {
@@ -822,4 +908,101 @@ const STRINGS: &[(&str, &str, &str)] = &[
     ("storage.type", "Type", "类型"),
     ("storage.used", "Used", "已用"),
     ("storage.written", "Total written", "总写入量"),
+    ("language.system", "Follow system", "跟随系统"),
+    ("language.english", "English", "English"),
+    ("language.chinese", "简体中文", "简体中文"),
+    ("theme.system", "Follow system", "跟随系统"),
+    ("theme.dark", "Dark", "深色"),
+    ("theme.light", "Light", "浅色"),
+    ("settings.theme", "Theme", "主题"),
+    (
+        "settings.language_hint",
+        "Follow system applies the OS language on next launch",
+        "跟随系统会在下次启动时应用系统语言",
+    ),
+    ("settings.updates", "Updates", "更新"),
+    ("app.saved", "Saved", "已保存"),
+    ("nav.about", "About", "关于"),
+    ("nav.updates", "Updates", "检查更新"),
+    (
+        "page.about.sub",
+        "Application, build environment and legal information",
+        "应用、构建环境与法律信息",
+    ),
+    (
+        "page.updates.sub",
+        "Compare the installed version with GitHub releases",
+        "将当前版本与 GitHub 发布版本进行对比",
+    ),
+    (
+        "update.auto",
+        "Check for updates automatically on startup",
+        "启动时自动检查更新",
+    ),
+    (
+        "update.include_prerelease",
+        "Include pre-releases",
+        "包含预发布版本",
+    ),
+    (
+        "update.hint",
+        "Uses the public GitHub API; no account or telemetry is involved.",
+        "使用公开的 GitHub API，不需要账号，也不会上传遥测数据。",
+    ),
+    ("update.open_updates", "Open update center", "打开更新中心"),
+    ("update.current", "Current version", "当前版本"),
+    ("update.check_now", "Check now", "立即检查"),
+    (
+        "update.idle",
+        "No update check has run yet.",
+        "尚未执行更新检查。",
+    ),
+    (
+        "update.checking",
+        "Checking GitHub releases…",
+        "正在检查 GitHub 发布版本…",
+    ),
+    ("update.failed", "Update check failed", "更新检查失败"),
+    (
+        "update.failure_hint",
+        "This is non-blocking. Check your network or try again later.",
+        "此失败不会影响使用，请检查网络或稍后重试。",
+    ),
+    ("update.available", "Update available", "有可用更新"),
+    ("update.up_to_date", "Up to date", "已是最新版本"),
+    ("update.prerelease", "Pre-release", "预发布"),
+    ("update.checked", "Checked", "检查时间"),
+    ("update.latest", "Latest version", "最新版本"),
+    ("update.tag", "Release tag", "发布标签"),
+    ("update.name", "Release name", "发布名称"),
+    ("update.published", "Published", "发布时间"),
+    ("update.unknown", "Unknown", "未知"),
+    ("update.open_release", "Open release page", "打开发布页面"),
+    ("about.application", "Application", "应用信息"),
+    ("about.author", "Author", "作者"),
+    ("about.version", "Version", "版本"),
+    ("about.license", "License", "许可协议"),
+    ("about.github", "GitHub profile", "GitHub 主页"),
+    ("about.repository", "Source repository", "源码仓库"),
+    ("about.rust", "Rust build environment", "Rust 构建环境"),
+    ("about.rustc", "Rust compiler", "Rust 编译器"),
+    ("about.target", "Build target", "构建目标"),
+    ("about.profile", "Build profile", "构建配置"),
+    ("about.commit", "Git commit", "Git 提交"),
+    ("about.built", "Build time", "构建时间"),
+    ("about.runtime", "Runtime environment", "运行环境"),
+    ("about.os", "Operating system", "操作系统"),
+    ("about.arch", "Architecture", "架构"),
+    ("about.family", "Platform family", "平台系列"),
+    ("about.pointer_width", "Pointer width", "指针宽度"),
+    ("about.legal", "Legal", "法律信息"),
+    (
+        "about.legal_hint",
+        "Source-visible proprietary software. Commercial use requires written permission.",
+        "源码可见的专有软件，商业使用必须获得书面授权。",
+    ),
+    ("about.legal_statement", "Legal statement", "法律声明"),
+    ("about.privacy", "Privacy statement", "隐私声明"),
+    ("about.disclaimer", "Disclaimer", "免责声明"),
+    ("about.contact", "Contact", "联系方式"),
 ];
