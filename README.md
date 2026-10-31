@@ -4,6 +4,8 @@
 
 Rust · eframe/egui · 异步并行采集 · GUI + CLI · Windows / Linux / macOS
 
+[🇨🇳 中文](#中文) · [🇬🇧 English](#english)
+
 **当前版本 Current release: 1.0.1** · [发行说明 Release notes](RELEASE_NOTES_1.0.1.md)
 
 > 本项目采用**定制化专有许可协议**，不是开源软件。个人与非营利组织可免费本地使用；任何商业用途必须事先获得作者书面授权。详见 [LICENSE](LICENSE) 与 [LEGAL_STATEMENT.md](LEGAL_STATEMENT.md)。
@@ -12,26 +14,42 @@ Rust · eframe/egui · 异步并行采集 · GUI + CLI · Windows / Linux / macO
 
 ## 中文
 
-### 1. 项目简介
+**导航 / 目录**
 
-Device Viewer 是一款使用 Rust 编写的跨平台硬件信息查看工具。它通过统一的数据采集层读取 CPU、内存、主板、PCIe、USB、存储、显示器、传感器、网络、音频以及图形与计算运行时信息，并以原生桌面界面或命令行报告的形式呈现。
+- [项目简介](#项目简介)
+- [核心优势](#核心优势)
+- [功能一览](#功能一览)
+- [架构设计](#架构设计)
+- [跨平台支持](#跨平台支持)
+- [快速开始](#快速开始)
+- [CLI 参考](#cli-参考)
+- [特性开关](#特性开关)
+- [测试与质量](#测试与质量)
+- [数据与隐私](#数据与隐私)
+- [许可证与商业授权](#许可证与商业授权)
+- [免责声明](#免责声明)
+- [联系](#联系)
 
-项目将**硬件采集**与**界面展示**彻底解耦：采集层只负责生成结构化、可序列化的数据；界面层只读取这些数据负责呈现。任一采集模块出现权限不足、驱动缺失、设备不支持或超时，都不会中断其他模块，也不会导致整个应用崩溃。
+### 项目简介
 
-### 2. 核心优势
+🖥️ Device Viewer 是一款使用 Rust 编写的跨平台硬件信息查看工具。它通过统一的数据采集层读取 CPU、内存、主板、PCIe、USB、存储、显示器、传感器、网络、音频以及图形与计算运行时信息，并以原生桌面界面或命令行报告的形式呈现。
 
-- **原生性能**：Rust 编译为本地机器码，启动快、内存占用可控，无浏览器内核与运行时解释开销。
-- **异步并行采集**：各硬件模块通过 Tokio 并行执行，每项任务具有独立超时与取消信号；切换页面时旧任务可被取消，结果不会互相覆盖。
-- **故障隔离**：单个模块失败仅生成一条警告或错误记录，其余模块继续完成；报告始终可用。
-- **采集与 UI 解耦**：`device_query` 不依赖 `eframe/egui`，可独立测试、复用或用于批处理。
-- **快照对比**：将某次硬件状态保存为 `.dvsnap`，后续可与当前状态或另一份快照逐字段比较，突出新增、移除与变化项。
-- **多格式导出**：TXT、Markdown、JSON；支持 Markdown 表格复制与导出预览。
-- **开发者工具**：内置 Vulkan 设备信息、扩展说明、C/Rust 代码片段与内部日志查看器。
-- **中英双语与明暗主题**：界面文本、导出内容与设置项均支持中文/英文；主题可持久化。
-- **便携模式**：配置、快照与日志可全部保存在可执行文件旁，适合 U 盘、离线环境与受控工作站。
-- **纯本地运行**：默认不联网，不上传硬件信息、用户信息或使用数据。
+项目将**硬件采集**与**界面展示**彻底解耦：采集层只负责生成结构化、可序列化的数据，界面层只读取这些数据并负责呈现。任一采集模块出现权限不足、驱动缺失、设备不支持或超时，都不会中断其他模块，也不会导致整个应用崩溃。
 
-### 3. 功能一览
+### 核心优势
+
+- **⚡ 原生性能**：Rust 编译为本地机器码，启动快、内存占用可控，无浏览器内核与运行时解释开销。
+- **🧵 异步并行采集**：各硬件模块通过 Tokio 并行执行，每项任务具有独立超时与取消信号；切换页面时旧任务可被取消，结果不会互相覆盖。
+- **🛡️ 故障隔离**：单个模块失败仅生成一条警告或错误记录，其余模块继续完成，报告始终可用。
+- **🔌 采集与 UI 解耦**：`device_query` 不依赖 `eframe/egui`，可独立测试、复用或用于批处理。
+- **📸 快照对比**：将某次硬件状态保存为 `.dvsnap`，后续可与当前状态或另一份快照逐字段比较，突出新增、移除与变化项。
+- **📤 多格式导出**：支持 TXT、Markdown、JSON，以及 Markdown 表格复制与导出预览。
+- **🧰 开发者工具**：内置 Vulkan 设备信息、扩展说明、C/Rust 代码片段与内部日志查看器。
+- **🌐 中英双语与明暗主题**：界面文本、导出内容与设置项均支持中文/英文；主题可持久化。
+- **💼 便携模式**：配置、快照与日志可全部保存在可执行文件旁，适合 U 盘、离线环境与受控工作站。
+- **🔒 纯本地运行**：默认不联网，不上传硬件信息、用户信息或使用数据。
+
+### 功能一览
 
 | 模块 | 主要内容 |
 | --- | --- |
@@ -57,16 +75,16 @@ Device Viewer 是一款使用 Rust 编写的跨平台硬件信息查看工具。
 
 > 硬件信息的可见范围取决于操作系统、驱动、固件、设备权限及虚拟化环境。Device Viewer 会在可用范围内尽力呈现；个别设备或接口可能只显示部分字段，这属于正常差异，不代表程序故障。
 
-### 4. 架构设计
+### 架构设计
 
 ```text
 ┌──────────────────────────────────────────────────────────────┐
-│                        main.rs                              │
-│         GUI 启动 / CLI 参数 / 补全脚本 / 退出码              │
+│                        main.rs                               │
+│         GUI 启动 / CLI 参数 / 补全脚本 / 退出码               │
 └───────────────┬──────────────────────────────┬───────────────┘
                 │                              │
         ┌───────▼────────┐            ┌────────▼────────┐
-        │     app.rs     │            │    export.rs     │
+        │     app.rs     │            │    export.rs    │
         │ 生命周期与调度  │            │ TXT/MD/JSON 渲染 │
         └───────┬────────┘            └────────┬────────┘
                 │                              │
@@ -82,8 +100,8 @@ Device Viewer 是一款使用 Rust 编写的跨平台硬件信息查看工具。
         └───────────────────┬──────────────────────────┘
                             │
         ┌───────────────────▼──────────────────────────┐
-        │ OS API · sysinfo · pci-info · ash · OpenCL   │
-        │ DXGI · SetupAPI · GDI · Metal · smartctl     │
+        │ OS API · sysinfo · pci-info · ash · OpenCL    │
+        │ DXGI · SetupAPI · GDI · Metal · smartctl      │
         └──────────────────────────────────────────────┘
 ```
 
@@ -104,7 +122,7 @@ Device Viewer 是一款使用 Rust 编写的跨平台硬件信息查看工具。
 - 快照枚举含未知值回退，旧版本可读取未来新增字段；新增字段默认可选。
 - GPU 资源、Windows 设备信息集等使用 RAII/Drop 释放；退出时等待 Tokio 运行时收敛。
 
-### 5. 跨平台支持
+### 跨平台支持
 
 | 平台 | 图形界面 | CLI | 说明 |
 | --- | --- | --- | --- |
@@ -112,9 +130,9 @@ Device Viewer 是一款使用 Rust 编写的跨平台硬件信息查看工具。
 | Linux | 支持 | 支持 | X11/Wayland、sysfs、hwmon、DRM 等后端 |
 | macOS | 支持 | 支持 | Metal、system_profiler 等后端 |
 
-不同平台的字段覆盖并不完全一致；例如 SMART 依赖系统是否提供 `smartctl`，NVIDIA 温度依赖 `nvidia-smi`，部分传感器需要管理员/root 权限。程序会对缺失项给出提示，而不是假定所有设备都具备同一能力。
+不同平台的字段覆盖并不完全一致。例如，SMART 依赖系统是否提供 `smartctl`，NVIDIA 温度依赖 `nvidia-smi`，部分传感器需要管理员/root 权限。程序会对缺失项给出提示，而不是假定所有设备都具备同一能力。
 
-### 6. 快速开始
+### 快速开始
 
 **环境要求**
 
@@ -155,7 +173,7 @@ cargo run --release -- --completions zsh
 cargo run --release -- --completions powershell
 ```
 
-### 7. CLI 参考
+### CLI 参考
 
 ```text
 Device Viewer — cross-platform hardware inspector
@@ -182,7 +200,7 @@ OPTIONS:
 - 输出格式由扩展名决定：`.txt`、`.md`、`.json`。
 - 未知模块、缺失参数或无法写入文件时返回非零退出码。
 
-### 8. 特性开关
+### 特性开关
 
 ```toml
 default = ["vulkan", "opencl", "metal", "sensors"]
@@ -205,7 +223,7 @@ sensors = ["sysinfo/component"]
 cargo run --release --no-default-features
 ```
 
-### 9. 测试与质量
+### 测试与质量
 
 ```bash
 cargo fmt --all -- --check
@@ -223,20 +241,20 @@ cargo test --no-default-features
 - 快照：可选字段序列化、默认值、未知字段/未知枚举前向兼容、非有限值清洗。
 - 状态：快照文件名唯一性、路径穿越拦截、便携模式根目录切换、时间戳渲染。
 
-### 10. 数据与隐私
+### 数据与隐私
 
 - 默认不发起任何网络请求，不上传硬件信息、快照、日志或使用统计。
 - 配置、快照、日志均保存在本机；便携模式下位于可执行文件旁。
-- 快照可能包含主机名、序列号、MAC 地址、IP 地址等设备标识。分享前请自行审查。
+- 快照可能包含主机名、序列号、MAC 地址、IP 地址等设备标识，分享前请自行审查。
 - 详细说明见 [PRIVACY.md](PRIVACY.md)。
 
-### 11. 许可证与商业授权
+### 许可证与商业授权
 
 本项目采用**定制化专有许可协议**，不是 MIT、Apache-2.0、GPL、BSD 或任何 OSI 认可的开源许可证。
 
 1. 本项目完整著作权归原作者独有。
 2. 个人、非营利组织：可以免费本地使用、学习研究。
-3. 所有盈利组织、商业团队、企业、工作室、付费开发者：禁止使用、复制、修改、衍生、二次开源、二次闭源、二次打包、二次分发、二次发布、商用售卖、集成进商业项目、SaaS、付费工具、课程售卖。所有商业用途必须提前发送邮件 yanruoxinsu2@outlook.com 获取作者书面授权，未经授权全部属于侵权。
+3. 所有盈利组织、商业团队、企业、工作室、付费开发者：禁止使用、复制、修改、衍生、二次开源、二次闭源、二次打包、二次分发、二次发布、商用售卖、集成进商业项目、SaaS、付费工具、课程售卖。所有商业用途必须提前发送邮件至 **yanruoxinsu2@outlook.com** 获取作者书面授权，未经授权全部属于侵权。
 4. 任何个人/组织修改源代码，必须在项目仓库提交 Issue 写明修改内容，不报备视为侵权。
 5. 严禁任何主体修改代码后二次公开、二次发布、二次开源、二次引流售卖。
 6. 一旦查实商业侵权、二次发布、未授权商用、私自魔改分发行为，作者将直接依据《中华人民共和国著作权法》启动完整法律追责流程，包含民事起诉、侵权索赔、下架全部侵权项目、公开追责。
@@ -244,11 +262,11 @@ cargo test --no-default-features
 
 完整条款以 [LICENSE](LICENSE) 为准；法律边界、侵权后果与维权方式见 [LEGAL_STATEMENT.md](LEGAL_STATEMENT.md)。
 
-### 12. 免责声明
+### 免责声明
 
 本软件按“现状”提供，不保证硬件信息、SMART 数据、传感器读数或兼容性完全准确。详细免责条款见 [DISCLAIMER.md](DISCLAIMER.md)。
 
-### 13. 联系
+### 联系
 
 - 商业授权：**yanruoxinsu2@outlook.com**
 - 修改报备：请在项目仓库提交 Issue，写明修改目的、范围、文件与行为变化。
@@ -257,26 +275,42 @@ cargo test --no-default-features
 
 ## English
 
-### 1. Overview
+**Navigation / Contents**
 
-Device Viewer is a cross-platform hardware inspector written in Rust. A unified collection layer reads CPU, memory, motherboard, PCIe, USB, storage, display, sensor, network, audio, graphics and compute-runtime information, then presents it through a native desktop interface or a command-line report.
+- [Overview](#overview)
+- [Highlights](#highlights)
+- [Feature Matrix](#feature-matrix)
+- [Architecture](#architecture)
+- [Platform Support](#platform-support)
+- [Quick Start](#quick-start)
+- [CLI Reference](#cli-reference)
+- [Feature Flags](#feature-flags)
+- [Testing](#testing)
+- [Privacy](#privacy)
+- [License and Commercial Licensing](#license-and-commercial-licensing)
+- [Disclaimer](#disclaimer)
+- [Contact](#contact)
 
-The project keeps **hardware collection** and **presentation** strictly separated. Collectors produce structured, serializable data; the UI only reads that data. If one collector encounters missing permissions, a missing driver, an unsupported device or a timeout, the other collectors still finish and the application does not crash.
+### Overview
 
-### 2. Highlights
+🖥️ Device Viewer is a cross-platform hardware inspector written in Rust. A unified collection layer reads CPU, memory, motherboard, PCIe, USB, storage, display, sensor, network, audio, graphics, and compute-runtime information, then presents it through a native desktop interface or a command-line report.
 
-- **Native performance** — compiled to machine code; fast startup, predictable memory use, no embedded browser engine.
-- **Asynchronous parallel collection** — Tokio runs collectors concurrently with per-module timeouts and cancellation. Page changes cancel stale work and cannot overwrite newer results.
-- **Failure isolation** — a failed module produces a warning or error entry while the rest of the report remains available.
-- **Decoupled architecture** — `device_query` has no dependency on `eframe/egui` and can be tested or reused independently.
-- **Snapshot comparison** — save a `.dvsnap`, then diff it against the current state or another snapshot with added/removed/changed highlighting.
-- **Multi-format export** — TXT, Markdown and JSON, with preview and Markdown table copy.
-- **Developer tools** — Vulkan device details, extension descriptions, C/Rust snippets and an internal log viewer.
-- **Bilingual UI** — Chinese and English, including exported reports; dark and light themes.
-- **Portable mode** — keep configuration, snapshots and logs beside the executable for USB drives and offline workstations.
-- **Local by design** — no network access, no upload of hardware or user data, no telemetry.
+The project keeps **hardware collection** and **presentation** strictly separated. Collectors produce structured, serializable data; the UI only reads that data. If one collector encounters missing permissions, a missing driver, an unsupported device, or a timeout, the other collectors still finish and the application does not crash.
 
-### 3. Feature Matrix
+### Highlights
+
+- **⚡ Native performance** — compiled to machine code; fast startup, predictable memory use, and no embedded browser engine.
+- **🧵 Asynchronous parallel collection** — Tokio runs collectors concurrently with per-module timeouts and cancellation. Page changes cancel stale work and cannot overwrite newer results.
+- **🛡️ Failure isolation** — a failed module produces a warning or error entry while the rest of the report remains available.
+- **🔌 Decoupled architecture** — `device_query` has no dependency on `eframe/egui` and can be tested or reused independently.
+- **📸 Snapshot comparison** — save a `.dvsnap`, then diff it against the current state or another snapshot with added/removed/changed highlighting.
+- **📤 Multi-format export** — TXT, Markdown, and JSON, with preview and Markdown table copy.
+- **🧰 Developer tools** — Vulkan device details, extension descriptions, C/Rust snippets, and an internal log viewer.
+- **🌐 Bilingual UI** — Chinese and English, including exported reports; dark and light themes.
+- **💼 Portable mode** — keep configuration, snapshots, and logs beside the executable for USB drives and offline workstations.
+- **🔒 Local by design** — no network access, no upload of hardware or user data, no telemetry.
+
+### Feature Matrix
 
 | Area | What is shown |
 | --- | --- |
@@ -300,9 +334,9 @@ The project keeps **hardware collection** and **presentation** strictly separate
 | Bandwidth | Local memory read, write and copy samples |
 | Checklist | Capability availability, permission state, warnings and failures |
 
-> What can be observed depends on the operating system, drivers, firmware, device permissions and virtualization. Device Viewer presents as much as the environment exposes; partial fields on some devices are normal and do not indicate a program defect.
+> What can be observed depends on the operating system, drivers, firmware, device permissions, and virtualization. Device Viewer presents as much as the environment exposes; partial fields on some devices are normal and do not indicate a program defect.
 
-### 4. Architecture
+### Architecture
 
 ```text
 main.rs        GUI startup / CLI parsing / completions / exit codes
@@ -313,17 +347,24 @@ state.rs       settings, snapshots, portable paths, favorites
 device_query/  20 collectors, unified errors, cancellation and timeouts
 ```
 
-Design rules:
+**Design rules**
 
 1. `device_query` is a pure data layer with no UI types.
 2. `ui` never calls operating-system APIs directly.
-3. `state` persists theme, language, units, window rect, filters, favorite extensions, snapshots and portable mode.
-4. `app` orchestrates loading, collection, cancellation, GPU sampling and cleanup.
+3. `state` persists theme, language, units, window rect, filters, favorite extensions, snapshots, and portable mode.
+4. `app` orchestrates loading, collection, cancellation, GPU sampling, and cleanup.
 5. `export` renders the same snapshot that the UI displays.
 
-Reliability measures include a unified `QueryResult<T>` with warning/error severity, `CancellationToken` on every task, blocking work on `spawn_blocking`, JSON sanitization for non-finite floats, forward-compatible snapshot enums, RAII release of GPU and SetupAPI resources, and a bounded Tokio shutdown.
+**Reliability measures**
 
-### 5. Platform Support
+- A unified `QueryResult<T>` classifies recoverable problems as warnings without blocking the overall pass.
+- Every collection task carries a `CancellationToken`; timeouts, page changes, and shutdown can cancel it.
+- Blocking system calls run on `spawn_blocking` to avoid occupying the async executor.
+- Non-finite floats are sanitized before snapshots are written, keeping JSON valid.
+- Snapshot enums have unknown-value fallbacks, so older versions can read future fields; new fields are optional by default.
+- GPU resources and Windows device information sets are released through RAII/Drop; shutdown waits for the Tokio runtime to quiesce.
+
+### Platform Support
 
 | Platform | GUI | CLI | Notes |
 | --- | --- | --- | --- |
@@ -333,7 +374,7 @@ Reliability measures include a unified `QueryResult<T>` with warning/error sever
 
 Field coverage differs by platform. SMART requires `smartctl`, NVIDIA temperatures require `nvidia-smi`, and some sensors require administrator/root privileges. Missing capabilities are reported as warnings rather than assumed to exist.
 
-### 6. Quick Start
+### Quick Start
 
 Requirements: Rust 1.95+ (edition 2024), standard C/C++ build tools, and the platform graphics development libraries. Optional: `smartctl`, `nvidia-smi`, Vulkan Loader, OpenCL ICD, OpenVX SDK.
 
@@ -356,25 +397,31 @@ cargo run --release -- --completions zsh
 cargo run --release -- --completions powershell
 ```
 
-### 7. CLI Reference
+### CLI Reference
 
 ```text
---cli                 Force batch/CLI mode (implied by --out/--only/--snapshot).
---out <PATH>          Write TXT, Markdown or JSON, chosen from the extension.
---only <LIST>         Comma-separated modules: cpu,memory,pcie,vulkan,opengl,
-                      opencl,npu,usb,storage,motherboard,display,directx,metal,
-                      openvx,system,network,audio,sensors,bandwidth.
---snapshot <PATH>     Export an existing .dvsnap/JSON snapshot instead of querying.
---quiet               Suppress progress and warning chatter.
---portable            Persist configuration and snapshots beside the executable.
---completions <SHELL> Print bash, zsh or powershell completion script.
---version             Print the version.
--h, --help            Print help.
+Device Viewer — cross-platform hardware inspector
+
+USAGE:
+    device-viewer [OPTIONS]
+
+OPTIONS:
+    --cli                 Force batch/CLI mode (implied by --out/--only/--snapshot).
+    --out <PATH>          Write TXT, Markdown or JSON, chosen from the extension.
+    --only <LIST>         Comma-separated modules: cpu,memory,pcie,vulkan,opengl,
+                          opencl,npu,usb,storage,motherboard,display,directx,metal,
+                          openvx,system,network,audio,sensors,bandwidth.
+    --snapshot <PATH>     Export an existing .dvsnap/JSON snapshot instead of querying.
+    --quiet               Suppress progress and warning chatter.
+    --portable            Persist configuration and snapshots beside the executable.
+    --completions <SHELL> Print completion script: bash, zsh or powershell.
+    --version             Print the version.
+    -h, --help            Print this help.
 ```
 
-The GUI starts when no batch option is supplied. Unknown modules, missing values or write failures return a non-zero exit code.
+The GUI starts when no batch option is supplied. The `--only` flag retains only the named modules; `system` is kept automatically when `network` or `audio` is selected. Output format follows the extension (`.txt`, `.md`, `.json`). Unknown modules, missing values, or write failures return a non-zero exit code.
 
-### 8. Feature Flags
+### Feature Flags
 
 ```toml
 default = ["vulkan", "opencl", "metal", "sensors"]
@@ -385,13 +432,19 @@ openvx  = ["dep:openvx"]
 sensors = ["sysinfo/component"]
 ```
 
-`openvx` is off by default because it requires a local OpenVX SDK and libclang. A minimal build:
+- `vulkan`: Vulkan devices, memory heaps, and extensions.
+- `opencl`: OpenCL platforms and devices.
+- `metal`: macOS Metal device information.
+- `openvx`: OpenVX context availability; requires a local OpenVX SDK and libclang, and is disabled by default.
+- `sensors`: temperature, fan, and voltage sensors.
+
+Minimal build:
 
 ```bash
 cargo run --release --no-default-features
 ```
 
-### 9. Testing
+### Testing
 
 ```bash
 cargo fmt --all -- --check
@@ -400,35 +453,34 @@ cargo test
 cargo test --no-default-features
 ```
 
-Coverage includes unit formatting, error severity, serialization round-trips, per-module contracts, timeout/cancellation, failure isolation, snapshot forward compatibility, non-finite sanitization, path-traversal rejection and portable root switching.
+Coverage includes unit formatting, error severity, serialization round-trips, per-module contracts, timeout/cancellation, failure isolation, snapshot forward compatibility, non-finite sanitization, path-traversal rejection, and portable root switching.
 
-### 10. Privacy
+### Privacy
 
-No network requests, no telemetry, no account system. Configuration, snapshots and logs stay on the local machine; portable mode stores them beside the executable. Snapshots may contain hostnames, serial numbers, MAC addresses and IP addresses — review before sharing. See [PRIVACY.md](PRIVACY.md).
+No network requests, no telemetry, no account system. Configuration, snapshots, and logs stay on the local machine; portable mode stores them beside the executable. Snapshots may contain hostnames, serial numbers, MAC addresses, and IP addresses — review them before sharing. See [PRIVACY.md](PRIVACY.md).
 
-### 11. License and Commercial Licensing
+### License and Commercial Licensing
 
-This is a **custom proprietary, source-available license**, not MIT, Apache-2.0, GPL, BSD or any OSI-approved open-source license.
+This is a **custom proprietary, source-available license**, not MIT, Apache-2.0, GPL, BSD, or any OSI-approved open-source license.
 
-- Copyright in the complete project belongs exclusively to the original author.
-- Individuals and non-profit organizations may use it locally for free, for learning and research.
-- **All for-profit organizations, commercial teams, enterprises, studios and paid developers are prohibited** from using, copying, modifying, creating derivatives from, re-open-sourcing, re-closing, repackaging, redistributing, republishing, selling, integrating into commercial projects, offering as SaaS, shipping in paid tools or selling in courses.
-- **Commercial licensing**: prior written authorization must be obtained by emailing **yanruoxinsu2@outlook.com**. Unauthorized commercial use is infringement.
-- **Modification notice**: any person or organization modifying the source must open an Issue in the project repository describing the changes. Failure to report is infringement.
-- **No secondary publication**: modified code may not be publicly republished, re-released, re-open-sourced or used for paid traffic.
-- **Enforcement**: verified commercial infringement, unauthorized redistribution or unauthorized modified distribution will lead to a full legal process under the Copyright Law of the People's Republic of China, including civil litigation, damages, takedown of infringing projects and public accountability.
-- **Interpretation and jurisdiction**: final interpretation rests with the original author; governing law is the law of mainland China.
+1. Copyright in the complete project belongs exclusively to the original author.
+2. Individuals and non-profit organizations may use it locally for free, for learning and research.
+3. **All for-profit organizations, commercial teams, enterprises, studios, and paid developers are prohibited** from using, copying, modifying, creating derivatives from, re-open-sourcing, re-closing, repackaging, redistributing, republishing, selling, integrating into commercial projects, offering as SaaS, shipping in paid tools, or selling in courses. All commercial use requires prior written authorization by emailing **yanruoxinsu2@outlook.com**. Unauthorized use is infringement.
+4. Any person or organization modifying the source must open an Issue in the project repository describing the changes. Failure to report is infringement.
+5. No entity may publicly republish, re-release, re-open-source, or use modified code for paid traffic after modification.
+6. Verified commercial infringement, unauthorized redistribution, or unauthorized modified distribution will lead to a full legal process under the Copyright Law of the People's Republic of China, including civil litigation, damages, takedown of infringing projects, and public accountability.
+7. Final interpretation rests with the original author; governing law is the law of mainland China.
 
 The complete terms are in [LICENSE](LICENSE); legal boundaries and enforcement are detailed in [LEGAL_STATEMENT.md](LEGAL_STATEMENT.md).
 
-### 12. Disclaimer
+### Disclaimer
 
-Provided “as is”, without warranty that hardware information, SMART data, sensor readings or compatibility are complete or accurate. See [DISCLAIMER.md](DISCLAIMER.md).
+Provided “as is”, without warranty that hardware information, SMART data, sensor readings, or compatibility are complete or accurate. See [DISCLAIMER.md](DISCLAIMER.md).
 
-### 13. Contact
+### Contact
 
 - Commercial licensing: **yanruoxinsu2@outlook.com**
-- Modification notice: open an Issue in the project repository with purpose, scope, affected files and behavioral changes.
+- Modification notice: open an Issue in the project repository with the purpose, scope, affected files, and behavioral changes.
 
 ---
 
