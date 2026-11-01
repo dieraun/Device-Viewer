@@ -372,8 +372,9 @@ jobs:
           } > "${final_notes}"
 
           ls -l release-assets
-          shopt -s nullglob
-          assets=(release-assets/*)
+          mapfile -t assets < <(find release-assets -type f \( -name '*.zip' -o -name '*.tar.gz' -o -name '*.sha256' \) -print | sort)
+          printf 'Assets to publish:\n'
+          printf '  %s\n' "${assets[@]}"
           if gh release view "${TAG}" >/dev/null 2>&1; then
             if ((${#assets[@]} > 0)); then
               gh release upload "${TAG}" "${assets[@]}" --clobber
