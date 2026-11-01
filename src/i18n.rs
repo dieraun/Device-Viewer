@@ -566,6 +566,12 @@ const STRINGS: &[(&str, &str, &str)] = &[
         "No Vulkan device was reported",
         "未报告 Vulkan 设备",
     ),
+    ("gpu.no_vulkan_support", "No Vulkan support", "无Vulkan支持"),
+    (
+        "gpu.no_vulkan_hint",
+        "This GPU is not Vulkan-compatible; basic hardware inspection is unaffected.",
+        "该GPU不兼容Vulkan，不影响基础硬件读取。",
+    ),
     (
         "gpu.budget_supported",
         "Memory budget extension",

@@ -7,7 +7,7 @@ on:
   workflow_dispatch:
     inputs:
       tag:
-        description: "Release tag to build, for example v1.1.0"
+        description: "Release tag to build, for example v1.2.0"
         required: true
         type: string
 
@@ -53,6 +53,10 @@ jobs:
     name: Windows x86_64
     needs: metadata
     runs-on: windows-latest
+    # This runner is the slowest and has been cancelled by the job timeout
+    # before. Let the other platforms publish even if this one is interrupted.
+    timeout-minutes: 120
+    continue-on-error: true
     env:
       TARGET: x86_64-pc-windows-msvc
       VERSION: ${{ needs.metadata.outputs.version }}
@@ -313,8 +317,17 @@ jobs:
       - build-windows
       - build-macos
       - build-linux
+    # A cancelled/failed Windows runner must not hold the release hostage.
+    # Publish when the version was resolved and at least one non-Windows
+    # platform produced a package; the notes below list anything missing.
+    if: ${{ always() && needs.metadata.result == 'success' && (needs.build-macos.result == 'success' || needs.build-linux.result == 'success') }}
     runs-on: ubuntu-latest
     steps:
+      - name: Checkout release notes
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 1
+
       - name: Download packaged artifacts
         uses: actions/download-artifact@v4
         with:
@@ -329,19 +342,43 @@ jobs:
           TAG: ${{ needs.metadata.outputs.tag }}
         run: |
           set -euo pipefail
-          ls -l release-assets
+          mkdir -p release-assets
           notes="RELEASE_NOTES_${TAG#v}.md"
-          notes_args=(--generate-notes)
-          if [[ -f "${notes}" ]]; then
-            notes_args=(--notes-file "${notes}")
+          final_notes="release-notes-${TAG}.md"
+          missing=()
+
+          if [[ -z "$(find release-assets -maxdepth 1 -type f -iname '*windows*' -print -quit)" ]]; then
+            missing+=("Windows x86_64: package not produced (build cancelled or failed) / 未产出安装包（构建取消或失败）")
           fi
-          if gh release view "${TAG}" >/dev/null 2>&1; then
-            gh release upload "${TAG}" release-assets/* --clobber
+          if [[ -z "$(find release-assets -maxdepth 1 -type f -iname '*macos*' -print -quit)" ]]; then
+            missing+=("macOS x86_64 / aarch64: package not produced (build cancelled or failed) / 未产出安装包（构建取消或失败）")
+          fi
+          if [[ -z "$(find release-assets -maxdepth 1 -type f -iname '*linux*' -print -quit)" ]]; then
+            missing+=("Linux x86_64 musl: package not produced (build cancelled or failed) / 未产出安装包（构建取消或失败）")
+          fi
+
+          {
             if [[ -f "${notes}" ]]; then
-              gh release edit "${TAG}" --notes-file "${notes}"
+              cat "${notes}"
+            else
+              printf '# Device Viewer %s\n\n' "${TAG#v}"
             fi
+            if ((${#missing[@]} > 0)); then
+              printf '\n## Missing packages / 缺失的安装包\n\n'
+              for item in "${missing[@]}"; do
+                printf -- '- %s\n' "${item}"
+              done
+            fi
+          } > "${final_notes}"
+
+          ls -l release-assets
+          shopt -s nullglob
+          assets=(release-assets/*)
+          if gh release view "${TAG}" >/dev/null 2>&1; then
+            if ((${#assets[@]} > 0)); then
+              gh release upload "${TAG}" "${assets[@]}" --clobber
+            fi
+            gh release edit "${TAG}" --notes-file "${final_notes}"
           else
-            gh release create "${TAG}" release-assets/* \
-              --title "Device Viewer ${TAG#v}" \
-              "${notes_args[@]}"
+            gh release create "${TAG}" "${assets[@]}" --title "Device Viewer ${TAG#v}" --notes-file "${final_notes}"
           fi

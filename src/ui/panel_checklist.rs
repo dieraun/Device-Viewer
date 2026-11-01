@@ -280,7 +280,17 @@ pub fn show(ui: &mut egui::Ui, state: &mut AppState, i18n: I18n) {
         widgets::card(ui, |ui| {
             ui.label(RichText::new(i18n.t("common.warnings")).strong());
             for failure in &snapshot.failures {
-                ui.label(RichText::new(format!("{}: {}", failure.module, failure.message)).weak());
+                ui.horizontal_wrapped(|ui| {
+                    let kind = if failure.is_warning() {
+                        widgets::BadgeKind::Warning
+                    } else {
+                        widgets::BadgeKind::Error
+                    };
+                    widgets::badge(ui, failure.level.as_str(), kind);
+                    ui.label(
+                        RichText::new(format!("{}: {}", failure.module, failure.message)).weak(),
+                    );
+                });
             }
         });
     }

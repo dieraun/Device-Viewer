@@ -99,12 +99,22 @@ fn overview(ui: &mut egui::Ui, state: &AppState, i18n: I18n) {
                     memory_detail,
                 );
 
+                let no_vulkan = snapshot
+                    .vulkan
+                    .as_ref()
+                    .map_or(true, |info| !info.available || info.devices.is_empty());
                 let gpu_value = state
                     .gpu_runtime
                     .first()
                     .and_then(|gpu| gpu.utilization_percent)
                     .map(|value| format!("{value:.1}%"))
-                    .unwrap_or_else(|| i18n.t("app.n_a").to_string());
+                    .unwrap_or_else(|| {
+                        if no_vulkan {
+                            i18n.t("gpu.no_vulkan_support").to_string()
+                        } else {
+                            i18n.t("app.n_a").to_string()
+                        }
+                    });
                 let gpu_detail = state
                     .gpu_runtime
                     .first()
@@ -116,12 +126,15 @@ fn overview(ui: &mut egui::Ui, state: &AppState, i18n: I18n) {
                             .and_then(|info| info.devices.first())
                             .map(|device| device.name.clone())
                     });
-                widgets::metric(
+                let gpu_response = widgets::metric(
                     &mut columns[2],
                     i18n.t("overview.gpu_summary"),
                     gpu_value,
                     gpu_detail,
                 );
+                if no_vulkan {
+                    let _ = gpu_response.on_hover_text(i18n.t("gpu.no_vulkan_hint"));
+                }
 
                 let storage_value = snapshot
                     .storage

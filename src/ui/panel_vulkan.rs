@@ -11,13 +11,31 @@ use crate::ui::widgets;
 pub fn show(ui: &mut egui::Ui, state: &mut AppState, i18n: I18n) {
     widgets::page_header(ui, i18n, "nav.vulkan", "page.vulkan.sub");
     let Some(info) = state.snapshot.vulkan.clone() else {
+        let response = widgets::badge_response(
+            ui,
+            i18n.t("gpu.no_vulkan_support"),
+            widgets::BadgeKind::Warning,
+        );
+        let _ = response.on_hover_text(i18n.t("gpu.no_vulkan_hint"));
+        ui.add_space(8.0);
         widgets::empty(ui, i18n.t("gpu.no_device"));
         return;
     };
     let units = state.settings.units;
 
     if !info.available {
-        widgets::empty(ui, i18n.t("app.not_available"));
+        let response = widgets::badge_response(
+            ui,
+            i18n.t("gpu.no_vulkan_support"),
+            widgets::BadgeKind::Warning,
+        );
+        let _ = response.on_hover_text(i18n.t("gpu.no_vulkan_hint"));
+        ui.add_space(8.0);
+    }
+
+    if info.devices.is_empty() {
+        widgets::empty(ui, i18n.t("gpu.no_device"));
+        return;
     }
 
     if !info.devices.is_empty() {

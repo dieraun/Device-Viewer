@@ -6,5 +6,5 @@
 #[test]
 fn package_metadata_is_stable() {
     assert_eq!(env!("CARGO_PKG_NAME"), "device-viewer");
-    assert_eq!(env!("CARGO_PKG_VERSION"), "1.1.0");
+    assert_eq!(env!("CARGO_PKG_VERSION"), "1.2.0");
 }

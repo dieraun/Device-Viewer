@@ -115,6 +115,7 @@ impl DeviceViewerApp {
             applied_theme: None,
             last_window_rect: None,
         };
+        crate::ui::widgets::install_style(&creation.egui_ctx);
         app.apply_theme(&creation.egui_ctx);
         app.start_query();
         if app.state.settings.auto_check_updates {
@@ -522,15 +523,43 @@ impl DeviceViewerApp {
 
     fn root_ui(&mut self, ui: &mut egui::Ui) {
         let page_before = self.state.settings.page;
+        let dark = ui.visuals().dark_mode;
+        let sidebar_bg = if dark {
+            egui::Color32::from_rgb(13, 19, 26)
+        } else {
+            egui::Color32::from_rgb(238, 243, 249)
+        };
+        let toolbar_bg = if dark {
+            egui::Color32::from_rgb(16, 22, 30)
+        } else {
+            egui::Color32::WHITE
+        };
+        let border = if dark {
+            egui::Color32::from_rgb(31, 42, 55)
+        } else {
+            egui::Color32::from_rgb(219, 226, 235)
+        };
         egui::Panel::left("device-viewer-sidebar")
             .resizable(false)
             .exact_size(224.0)
+            .frame(
+                egui::Frame::new()
+                    .fill(sidebar_bg)
+                    .inner_margin(egui::Margin::symmetric(10, 8)),
+            )
             .show(ui, |ui| {
                 ui::sidebar::show(ui, &mut self.state, self.i18n);
             });
-        egui::Panel::top("device-viewer-toolbar").show(ui, |ui| {
-            self.toolbar(ui);
-        });
+        egui::Panel::top("device-viewer-toolbar")
+            .frame(
+                egui::Frame::new()
+                    .fill(toolbar_bg)
+                    .inner_margin(egui::Margin::symmetric(12, 6))
+                    .stroke(egui::Stroke::new(1.0, border)),
+            )
+            .show(ui, |ui| {
+                self.toolbar(ui);
+            });
         self.permission_banner(ui);
         egui::CentralPanel::default().show(ui, |ui| {
             egui::ScrollArea::vertical()
