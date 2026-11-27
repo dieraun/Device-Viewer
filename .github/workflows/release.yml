@@ -330,7 +330,12 @@ jobs:
           tag_name: ${{ needs.metadata.outputs.tag }}
           name: Device Viewer ${{ needs.metadata.outputs.version }}
           body_path: release-notes.md
-          files: release-assets/**
+          # 只上传三平台归档与校验和；release-assets/** 会把包内解压出来的
+          # LICENSE / README / 可执行文件也一并当作资产上传，导致同名资产冲突。
+          files: |
+            release-assets/**/*.tar.gz
+            release-assets/**/*.zip
+            release-assets/**/*.sha256
           fail_on_unmatched_files: true
           draft: false
           prerelease: false
