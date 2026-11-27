@@ -25,8 +25,6 @@ pub mod snapshot_list;
 pub mod theme;
 pub mod widgets;
 
-use egui::RichText;
-
 use crate::device_query::{format_bytes, format_duration};
 use crate::i18n::I18n;
 use crate::state::{AppState, Page};
@@ -34,11 +32,11 @@ use crate::state::{AppState, Page};
 pub fn show_page(ui: &mut egui::Ui, state: &mut AppState, i18n: I18n) {
     // 标题由顶栏吸顶显示；这里只画当前分区的页签，再画唯一的一层滚动。
     let section = sidebar::section_of(state.settings.page);
-    if section.pages.len() > 1 {
-        if let Some(page) = widgets::tabs(ui, i18n, section.pages, state.settings.page) {
-            state.settings.page = page;
-            state.mark_dirty();
-        }
+    if section.pages.len() > 1
+        && let Some(page) = widgets::tabs(ui, i18n, section.pages, state.settings.page)
+    {
+        state.settings.page = page;
+        state.mark_dirty();
     }
     let failures: Vec<(String, String)> = state
         .snapshot
@@ -110,7 +108,7 @@ fn overview(ui: &mut egui::Ui, state: &AppState, i18n: I18n) {
     let no_vulkan = snapshot
         .vulkan
         .as_ref()
-        .map_or(true, |info| !info.available || info.devices.is_empty());
+        .is_none_or(|info| !info.available || info.devices.is_empty());
     let gpu_value = state
         .gpu_runtime
         .first()

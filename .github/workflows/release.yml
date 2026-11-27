@@ -77,7 +77,7 @@ jobs:
           DV_BUILD_COMMIT: ${{ github.sha }}
         run: |
           $ErrorActionPreference = "Stop"
-          cargo build --release --locked --all-features --target $env:TARGET
+          cargo build --release --locked --no-default-features --features "vulkan,opencl,sensors" --target $env:TARGET
 
       - name: Stage package
         shell: pwsh
@@ -160,7 +160,7 @@ jobs:
           DV_BUILD_COMMIT: ${{ github.sha }}
         run: |
           set -euo pipefail
-          cargo build --release --locked --all-features --target "${TARGET}"
+          cargo build --release --locked --no-default-features --features "vulkan,opencl,sensors" --target "${TARGET}"
           file "target/${TARGET}/release/device-viewer"
 
       - name: Stage package
@@ -226,7 +226,7 @@ jobs:
           DV_BUILD_COMMIT: ${{ github.sha }}
         run: |
           set -euo pipefail
-          cargo build --release --locked --all-features --target "${TARGET}"
+          cargo build --release --locked --no-default-features --features "vulkan,opencl,metal,sensors" --target "${TARGET}"
 
       - name: Stage package
         shell: bash

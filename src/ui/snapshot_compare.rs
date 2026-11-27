@@ -1,6 +1,6 @@
 //! Snapshot comparison with added / removed / changed highlighting.
 
-use egui::{Align2, FontId, Rect, RichText};
+use egui::RichText;
 use serde_json::Value;
 
 use crate::i18n::I18n;
@@ -31,6 +31,14 @@ impl ChangeKind {
             Self::Changed => t.warn,
         }
     }
+
+    fn badge(self) -> widgets::BadgeKind {
+        match self {
+            Self::Added => widgets::BadgeKind::Ok,
+            Self::Removed => widgets::BadgeKind::Error,
+            Self::Changed => widgets::BadgeKind::Warning,
+        }
+    }
 }
 
 struct DiffRow {
@@ -45,16 +53,6 @@ fn split_path(path: &str) -> (&str, &str) {
     match path.rfind('.') {
         Some(index) => (&path[index + 1..], &path[..index]),
         None => (path, ""),
-    }
-}
-
-fn truncate(text: &str, max_chars: usize) -> String {
-    if text.chars().count() <= max_chars {
-        text.to_string()
-    } else {
-        let mut short: String = text.chars().take(max_chars.saturating_sub(1)).collect();
-        short.push('…');
-        short
     }
 }
 
@@ -90,7 +88,7 @@ pub fn show(ui: &mut egui::Ui, state: &mut AppState, i18n: I18n) {
     let Some(before) = state.compare.clone() else {
         widgets::empty_state(
             ui,
-            &t,
+            t,
             theme::Icon::Snapshot,
             i18n.t("compare.no_baseline"),
             i18n.t("snapshot.choose"),
@@ -179,7 +177,7 @@ pub fn show(ui: &mut egui::Ui, state: &mut AppState, i18n: I18n) {
     if rows.is_empty() {
         widgets::empty_state(
             ui,
-            &t,
+            t,
             theme::Icon::Check,
             i18n.t("compare.identical"),
             i18n.t("compare.no_changes"),
@@ -188,120 +186,42 @@ pub fn show(ui: &mut egui::Ui, state: &mut AppState, i18n: I18n) {
         return;
     }
 
-    let total = ui.available_width();
-    let before_width = (total * 0.24).clamp(140.0, 320.0);
-    let after_width = before_width;
-    let bar_width = 4.0;
-    let field_width =
-        (total - bar_width - before_width - after_width - theme::SPACE_3 * 4.0).max(180.0);
-
-    // The header sits outside the scroll area so it stays visible.
-    ui.horizontal(|ui| {
-        ui.add_space(bar_width + theme::SPACE_2);
-        let mut header = |ui: &mut egui::Ui, text: &str, width: f32| {
-            ui.allocate_ui_with_layout(
-                egui::vec2(width, theme::ROW_HEIGHT),
-                egui::Layout::left_to_right(egui::Align::Center),
-                |ui| {
-                    ui.label(
-                        RichText::new(text)
-                            .size(theme::FONT_CAPTION)
-                            .color(t.text_tertiary),
-                    );
+    // 与其它面板共用同一张表：整行 hover、左侧变更色条、单击复制、右键复制字段/整行。
+    // 表头吸顶由 data_table 在滚动区顶部按需重绘实现，页面保持全站单层滚动。
+    let table_rows: Vec<widgets::Row> = rows
+        .iter()
+        .map(|row| {
+            let (leaf, parent) = split_path(&row.path);
+            let mut table_row = widgets::Row::new(vec![
+                widgets::Cell::Secondary {
+                    primary: leaf.to_string(),
+                    secondary: parent.to_string(),
                 },
-            );
-        };
-        header(ui, i18n.t("compare.field"), field_width);
-        header(ui, i18n.t("compare.change"), theme::SPACE_8 * 3.0);
-        header(ui, i18n.t("compare.before"), before_width);
-        header(ui, i18n.t("compare.after"), after_width);
-    });
-    ui.add_space(theme::SPACE_1);
-    ui.separator();
-
-    // 特例：表头已固定在滚动区外，这里的滚动容器只负责行区，是「全站单层滚动」
-    // 规则的唯一例外（1.3.0 验收裁决第 3 条），合并内层滚动会让表头一起滚走。
-    egui::ScrollArea::vertical()
-        .id_salt("compare-rows")
-        .auto_shrink([false, false])
-        .show(ui, |ui| {
-            for row in &rows {
-                let (rect, response) = ui.allocate_exact_size(
-                    egui::vec2(total, theme::ROW_HEIGHT),
-                    egui::Sense::click(),
-                );
-                let painter = ui.painter().with_clip_rect(rect);
-                if response.hovered() {
-                    painter.rect_filled(rect, egui::CornerRadius::ZERO, t.accent_subtle);
-                }
-                painter.rect_filled(
-                    Rect::from_min_size(rect.min, egui::vec2(bar_width, rect.height())),
-                    egui::CornerRadius::ZERO,
-                    row.kind.color(t),
-                );
-
-                let mut x = rect.left() + bar_width + theme::SPACE_2;
-                let (leaf, parent) = split_path(&row.path);
-                painter.text(
-                    egui::pos2(x, rect.center().y - 6.0),
-                    Align2::LEFT_CENTER,
-                    truncate(leaf, 40),
-                    FontId::new(theme::FONT_BODY, egui::FontFamily::Proportional),
-                    t.text_primary,
-                );
-                painter.text(
-                    egui::pos2(x, rect.center().y + 8.0),
-                    Align2::LEFT_CENTER,
-                    truncate(parent, 48),
-                    FontId::new(theme::FONT_CAPTION, egui::FontFamily::Monospace),
-                    t.text_tertiary,
-                );
-                if response.hovered() {
-                    response.clone().on_hover_text(&row.path);
-                }
-
-                x += field_width + theme::SPACE_3;
-                let chip = Rect::from_min_size(
-                    egui::pos2(x, rect.center().y - 10.0),
-                    egui::vec2(64.0, 20.0),
-                );
-                painter.rect_filled(
-                    chip,
-                    theme::RADIUS_CONTROL,
-                    row.kind.color(t).gamma_multiply(0.22),
-                );
-                painter.text(
-                    chip.center(),
-                    Align2::CENTER_CENTER,
-                    row.kind.label(i18n),
-                    FontId::new(theme::FONT_CAPTION, egui::FontFamily::Proportional),
-                    row.kind.color(t),
-                );
-
-                x += 64.0 + theme::SPACE_3;
-                painter.text(
-                    egui::pos2(x, rect.center().y),
-                    Align2::LEFT_CENTER,
-                    truncate(&row.before, (before_width / 7.0) as usize),
-                    FontId::new(theme::FONT_BODY, egui::FontFamily::Proportional),
-                    t.text_secondary,
-                );
-                x += before_width + theme::SPACE_3;
-                painter.text(
-                    egui::pos2(x, rect.center().y),
-                    Align2::LEFT_CENTER,
-                    truncate(&row.after, (after_width / 7.0) as usize),
-                    FontId::new(theme::FONT_BODY, egui::FontFamily::Proportional),
-                    t.text_primary,
-                );
-
-                if response.clicked() {
-                    ui.ctx()
-                        .copy_text(format!("{}	{}	{}", row.path, row.before, row.after));
-                    state.ui.notify(i18n.t("toast.copied"));
-                }
-            }
-        });
+                widgets::Cell::Badge(row.kind.label(i18n).to_string(), row.kind.badge()),
+                widgets::Cell::Text(row.before.clone()),
+                widgets::Cell::Text(row.after.clone()),
+            ]);
+            table_row.copy = format!("{}\t{}\t{}", row.path, row.before, row.after);
+            table_row.with_tint(row.kind.color(t))
+        })
+        .collect();
+    let table = widgets::data_table(
+        ui,
+        i18n,
+        "compare-table",
+        &[
+            i18n.t("compare.field"),
+            i18n.t("compare.change"),
+            i18n.t("compare.before"),
+            i18n.t("compare.after"),
+        ],
+        &[2.6, 0.9, 2.0, 2.0],
+        &table_rows,
+        true,
+    );
+    if table.clicked_row.is_some() {
+        state.ui.notify(i18n.t("toast.copied"));
+    }
 }
 
 fn diff_values(path: &str, before: &Value, after: &Value, rows: &mut Vec<DiffRow>) {

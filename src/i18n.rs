@@ -113,14 +113,6 @@ impl LanguagePreference {
             Self::Chinese => Language::Chinese,
         }
     }
-
-    pub const fn cycle(self) -> Self {
-        match self {
-            Self::System => Self::English,
-            Self::English => Self::Chinese,
-            Self::Chinese => Self::System,
-        }
-    }
 }
 
 impl From<Language> for LanguagePreference {
@@ -154,8 +146,8 @@ impl I18n {
     pub fn t(self, key: &'static str) -> &'static str {
         match lookup().get(key) {
             Some((en, zh)) => match self.language {
-                Language::English => *en,
-                Language::Chinese => *zh,
+                Language::English => en,
+                Language::Chinese => zh,
             },
             None => key,
         }
@@ -180,6 +172,7 @@ static CJK_AVAILABLE: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicB
 
 /// Returns true when the CJK fallback font was installed, so pages can warn
 /// about missing glyphs instead of rendering tofu boxes.
+#[cfg(target_os = "linux")]
 pub fn cjk_available() -> bool {
     CJK_AVAILABLE.load(std::sync::atomic::Ordering::Relaxed)
 }
@@ -925,6 +918,8 @@ const STRINGS: &[(&str, &str, &str)] = &[
     ),
     ("toast.copied", "Copied", "已复制"),
     ("toast.no_data", "Nothing to copy yet", "暂无可复制内容"),
+    ("table.copy_cell", "Copy this field", "复制该字段"),
+    ("table.copy_row", "Copy the whole row", "复制整行"),
     ("status.ok", "OK", "正常"),
     ("status.warning", "Warning", "警告"),
     ("status.error", "Error", "错误"),

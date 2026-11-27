@@ -60,21 +60,27 @@ pub fn show(ui: &mut egui::Ui, state: &mut AppState, i18n: I18n) {
         if extensions.is_empty() {
             ui.label(RichText::new(i18n.t("app.none")).weak());
         } else {
-            egui::ScrollArea::vertical()
-                .max_height(220.0)
-                .auto_shrink([false, false])
-                .show(ui, |ui| {
-                    egui::Grid::new("dev-extension-grid")
-                        .num_columns(2)
-                        .striped(true)
-                        .show(ui, |ui| {
-                            for extension in &extensions {
-                                ui.monospace(extension);
-                                ui.label(extension_description(extension));
-                                ui.end_row();
-                            }
-                        });
-                });
+            let rows: Vec<widgets::Row> = extensions
+                .iter()
+                .map(|extension| {
+                    widgets::Row::new(vec![
+                        widgets::Cell::Mono(extension.clone()),
+                        widgets::Cell::Muted(extension_description(extension).to_string()),
+                    ])
+                })
+                .collect();
+            let table = widgets::data_table(
+                ui,
+                i18n,
+                "dev-extension-table",
+                &[i18n.t("common.extensions"), i18n.t("common.detail")],
+                &[1.4, 2.6],
+                &rows,
+                false,
+            );
+            if table.clicked_row.is_some() {
+                state.ui.notify(i18n.t("toast.copied"));
+            }
         }
     });
 
@@ -94,26 +100,22 @@ pub fn show(ui: &mut egui::Ui, state: &mut AppState, i18n: I18n) {
             }
         });
         let entries = log::entries();
-        egui::ScrollArea::vertical()
-            .max_height(220.0)
-            .auto_shrink([false, false])
-            .show(ui, |ui| {
-                for entry in entries.iter().rev().take(200) {
-                    ui.label(
-                        RichText::new(format!(
-                            "{} [{}] {}",
-                            entry.timestamp_ms,
-                            entry.level.label(),
-                            entry.message
-                        ))
-                        .monospace()
-                        .size(theme::FONT_CAPTION),
-                    );
-                }
-                if entries.is_empty() {
-                    ui.label(RichText::new(i18n.t("app.none")).weak());
-                }
-            });
+        // 日志控制台不再自带滚动条：整页已经是单层滚动，内层再滚会套两层。
+        for entry in entries.iter().rev().take(50) {
+            ui.label(
+                RichText::new(format!(
+                    "{} [{}] {}",
+                    entry.timestamp_ms,
+                    entry.level.label(),
+                    entry.message
+                ))
+                .monospace()
+                .size(theme::FONT_CAPTION),
+            );
+        }
+        if entries.is_empty() {
+            ui.label(RichText::new(i18n.t("app.none")).weak());
+        }
     });
 }
 

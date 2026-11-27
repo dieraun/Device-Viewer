@@ -63,8 +63,10 @@ jobs:
       - name: Check formatting
         run: cargo fmt --all --check
 
+      # openvx 需要系统安装 OpenVX SDK（build 期 bindgen + 链接 libopenvx），
+      # 发布包从未包含该特性，因此 CI 与发布构建都用默认特性集校验。
       - name: Run clippy
-        run: cargo clippy --all-targets --all-features -- -D warnings
+        run: cargo clippy --all-targets --locked -- -D warnings
 
       - name: Run tests
-        run: cargo test --all-features --locked
+        run: cargo test --locked

@@ -16,6 +16,16 @@ cargo deny check licenses
 | `smartctl`（smartmontools） | 读取磁盘 SMART 属性 | GPL-2.0-or-later；由操作系统包管理器或设备厂商单独提供，本项目仅调用，不随包分发 |
 | `nvidia-smi`（NVIDIA 驱动） | 读取 NVIDIA GPU 信息 | NVIDIA 驱动 EULA；随显卡驱动安装，本项目仅调用，不随包分发 |
 
+## 字体（运行时引用系统字体，不随包分发）
+
+界面优先使用系统已安装的 Inter，中文回退到系统 CJK 字体。发布包不内嵌任何字体文件，发行包体积与字体许可义务均不因本程序而增加；若系统未安装对应字体，程序改用 egui 内置字体并在设置页提示。
+
+| 组件 | 用途 | 许可与版权 | 获取方式 |
+| --- | --- | --- | --- |
+| Inter | 界面首选西文字体（存在时） | SIL Open Font License 1.1；Copyright (c) 2016 The Inter Project Authors (https://github.com/rsms/inter) | 由操作系统或用户安装，不随包分发 |
+| Noto Sans CJK / 思源黑体 | 中文回退字体（存在时） | SIL Open Font License 1.1；Copyright (c) 2014-2021 Adobe (http://www.adobe.com/), with Reserved Font Name 'Source'，Google Noto 版本著作权归 Google LLC | 由操作系统包管理器安装，不随包分发 |
+| Microsoft YaHei / PingFang SC / WenQuanYi Zen Hei 等 | 各平台系统中文回退 | 各系统或发行版自带许可 | 随操作系统提供 |
+
 ## Rust 依赖
 
 | 组件 | 版本 | 许可 | 上游仓库 |

@@ -62,6 +62,7 @@ mod win {
         for index in 0..64u32 {
             // SAFETY: factory 是本函数新建的有效 COM 对象，调用期间一直存活。
             match unsafe { factory.EnumAdapters1(index) } {
+                // SAFETY: adapter 由同一工厂的 EnumAdapters1 返回，调用期间工厂与 adapter 都存活。
                 Ok(adapter) => match unsafe { adapter.GetDesc1() } {
                     Ok(desc) => {
                         adapters.push(DirectXAdapter {

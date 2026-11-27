@@ -100,29 +100,6 @@ pub fn page_body(ui: &mut egui::Ui, add: impl FnOnce(&mut egui::Ui)) {
     add(ui);
 }
 
-/// Page title. The shell draws the sticky title in the top bar, so panels use
-/// this only when they need an inline heading.
-pub fn page_header(
-    ui: &mut egui::Ui,
-    i18n: I18n,
-    title_key: &'static str,
-    subtitle_key: &'static str,
-) {
-    let t = theme::theme(ui);
-    ui.label(
-        RichText::new(i18n.t(title_key))
-            .size(theme::FONT_H1)
-            .strong()
-            .color(t.text_primary),
-    );
-    ui.label(
-        RichText::new(i18n.t(subtitle_key))
-            .size(theme::FONT_CAPTION)
-            .color(t.text_secondary),
-    );
-    ui.add_space(theme::SPACE_2);
-}
-
 pub fn card<R>(ui: &mut egui::Ui, add: impl FnOnce(&mut egui::Ui) -> R) -> R {
     card_response(ui, add).inner
 }
@@ -290,6 +267,441 @@ pub fn kv_grid(ui: &mut egui::Ui, id: &str, rows: &[(&str, String)]) {
             .rect_filled(line, egui::CornerRadius::ZERO, t.border_subtle);
         ui.add_space(1.0);
     }
+}
+
+/// One cell of a [`data_table`] row.
+///
+/// Cells are painted by the table itself so a whole row can highlight and react
+/// as one unit, which egui::Grid cannot express.
+pub enum Cell {
+    Text(String),
+    Strong(String),
+    Muted(String),
+    Mono(String),
+    Badge(String, BadgeKind),
+    Secondary { primary: String, secondary: String },
+    Bar(f32),
+}
+
+impl Cell {
+    /// Plain text used for clipboard copies and for the row context menu.
+    pub fn copy_text(&self) -> String {
+        match self {
+            Cell::Text(text)
+            | Cell::Strong(text)
+            | Cell::Muted(text)
+            | Cell::Mono(text)
+            | Cell::Badge(text, _) => text.clone(),
+            Cell::Secondary { primary, secondary } => {
+                if secondary.is_empty() {
+                    primary.clone()
+                } else {
+                    format!("{primary} ({secondary})")
+                }
+            }
+            Cell::Bar(fraction) => format!("{:.0}%", fraction * 100.0),
+        }
+    }
+}
+
+/// One row of a [`data_table`].
+pub struct Row {
+    pub cells: Vec<Cell>,
+    pub copy: String,
+    pub tint: Option<egui::Color32>,
+    pub action: Option<(Icon, String)>,
+}
+
+impl Row {
+    pub fn new(cells: Vec<Cell>) -> Self {
+        let copy = cells
+            .iter()
+            .map(Cell::copy_text)
+            .collect::<Vec<_>>()
+            .join("\t");
+        Self {
+            cells,
+            copy,
+            tint: None,
+            action: None,
+        }
+    }
+
+    /// Optional 4 px colour bar on the leading edge (used by the compare page).
+    pub fn with_tint(mut self, tint: egui::Color32) -> Self {
+        self.tint = Some(tint);
+        self
+    }
+
+    /// Optional trailing icon action, for example the snapshot row menu.
+    pub fn with_action(mut self, icon: Icon, hover: impl Into<String>) -> Self {
+        self.action = Some((icon, hover.into()));
+        self
+    }
+}
+
+/// What the user did with a [`data_table`] this frame.
+#[derive(Default)]
+pub struct TableResult {
+    pub clicked_row: Option<usize>,
+    pub double_clicked_row: Option<usize>,
+    pub action_row: Option<usize>,
+    /// Screen position of the clicked row action, so callers can anchor a menu.
+    pub action_pos: Option<egui::Pos2>,
+}
+
+fn fit_cell_text(
+    painter: &egui::Painter,
+    text: &str,
+    font: egui::FontId,
+    max_width: f32,
+) -> (String, bool) {
+    let probe = |value: &str| {
+        painter
+            .layout_no_wrap(value.to_owned(), font.clone(), egui::Color32::WHITE)
+            .size()
+            .x
+    };
+    if probe(text) <= max_width {
+        return (text.to_owned(), false);
+    }
+    let budget = (max_width - probe("\u{2026}")).max(0.0);
+    let mut shown = String::new();
+    for character in text.chars() {
+        shown.push(character);
+        if probe(&shown) > budget {
+            shown.pop();
+            break;
+        }
+    }
+    shown.push('\u{2026}');
+    (shown, true)
+}
+
+fn paint_cell_text(
+    painter: &egui::Painter,
+    rect: egui::Rect,
+    top: f32,
+    text: &str,
+    font: egui::FontId,
+    color: egui::Color32,
+    truncated: &mut Option<String>,
+) {
+    let (shown, elided) = fit_cell_text(painter, text, font.clone(), rect.width());
+    if elided && truncated.is_none() {
+        *truncated = Some(text.to_owned());
+    }
+    painter.text(
+        egui::pos2(rect.left(), top),
+        egui::Align2::LEFT_TOP,
+        shown,
+        font,
+        color,
+    );
+}
+
+fn paint_cell(
+    ui: &egui::Ui,
+    t: &Theme,
+    rect: egui::Rect,
+    cell: &Cell,
+    truncated: &mut Option<String>,
+) {
+    let painter = ui.painter();
+    let line_top = rect.center().y - theme::FONT_BODY / 2.0 - 1.0;
+    match cell {
+        Cell::Text(text) => paint_cell_text(
+            painter,
+            rect,
+            line_top,
+            text,
+            egui::FontId::proportional(theme::FONT_BODY),
+            t.text_primary,
+            truncated,
+        ),
+        Cell::Strong(text) => paint_cell_text(
+            painter,
+            rect,
+            line_top,
+            text,
+            egui::FontId::proportional(theme::FONT_BODY),
+            t.text_primary,
+            truncated,
+        ),
+        Cell::Muted(text) => paint_cell_text(
+            painter,
+            rect,
+            line_top + 1.0,
+            text,
+            egui::FontId::proportional(theme::FONT_CAPTION),
+            t.text_tertiary,
+            truncated,
+        ),
+        Cell::Mono(text) => paint_cell_text(
+            painter,
+            rect,
+            line_top,
+            text,
+            egui::FontId::monospace(theme::FONT_CAPTION),
+            t.text_secondary,
+            truncated,
+        ),
+        Cell::Badge(text, kind) => {
+            let tone = kind.tone(*t);
+            let font = egui::FontId::proportional(theme::FONT_CAPTION);
+            let galley = painter.layout_no_wrap(text.clone(), font, tone);
+            let width = (galley.size().x + theme::SPACE_3).min(rect.width());
+            let badge = egui::Rect::from_min_size(
+                egui::pos2(rect.left(), rect.center().y - 9.0),
+                Vec2::new(width, 18.0),
+            );
+            painter.rect_filled(
+                badge,
+                egui::CornerRadius::same(theme::RADIUS_CONTROL),
+                tone.gamma_multiply(0.18),
+            );
+            painter.with_clip_rect(badge).galley(
+                egui::pos2(
+                    badge.left() + theme::SPACE_2 / 2.0,
+                    badge.center().y - galley.size().y / 2.0,
+                ),
+                galley,
+                tone,
+            );
+            if width + theme::SPACE_1 >= rect.width() && truncated.is_none() {
+                *truncated = Some(text.clone());
+            }
+        }
+        Cell::Secondary { primary, secondary } => {
+            paint_cell_text(
+                painter,
+                rect,
+                rect.top() + theme::SPACE_1,
+                primary,
+                egui::FontId::proportional(theme::FONT_BODY),
+                t.text_primary,
+                truncated,
+            );
+            if !secondary.is_empty() {
+                paint_cell_text(
+                    painter,
+                    rect,
+                    rect.top() + theme::SPACE_1 + theme::FONT_BODY + 2.0,
+                    secondary,
+                    egui::FontId::proportional(theme::FONT_CAPTION),
+                    t.text_tertiary,
+                    truncated,
+                );
+            }
+        }
+        Cell::Bar(fraction) => {
+            let track = egui::Rect::from_center_size(rect.center(), Vec2::new(rect.width(), 6.0));
+            painter.rect_filled(
+                track,
+                egui::CornerRadius::same(theme::RADIUS_CONTROL),
+                t.border_subtle,
+            );
+            let filled = (fraction.clamp(0.0, 1.0) * track.width()).max(0.5);
+            let fill = egui::Rect::from_min_size(track.min, Vec2::new(filled, track.height()));
+            painter.rect_filled(
+                fill,
+                egui::CornerRadius::same(theme::RADIUS_CONTROL),
+                t.accent,
+            );
+        }
+    }
+}
+
+/// Table with whole-row hover, click-to-copy and a copy context menu.
+///
+/// Used by every hardware panel, the snapshot list and the compare page so the
+/// behaviour (and the truncation tooltip) is defined exactly once.
+pub fn data_table(
+    ui: &mut egui::Ui,
+    i18n: I18n,
+    id: &str,
+    headers: &[&str],
+    weights: &[f32],
+    rows: &[Row],
+    sticky_header: bool,
+) -> TableResult {
+    let t = theme::theme(ui);
+    let width = ui.available_width();
+    let columns = headers.len().max(1);
+    let has_action = rows.iter().any(|row| row.action.is_some());
+    let has_tint = rows.iter().any(|row| row.tint.is_some());
+    let action_width = if has_action { theme::SPACE_6 } else { 0.0 };
+    let tint_width = if has_tint { theme::SPACE_1 } else { 0.0 };
+    let gap = theme::SPACE_3;
+    let usable =
+        (width - action_width - tint_width - gap * columns.saturating_sub(1) as f32).max(120.0);
+    let total_weight: f32 = (0..columns)
+        .map(|index| weights.get(index).copied().unwrap_or(1.0))
+        .sum::<f32>()
+        .max(0.1);
+    let widths: Vec<f32> = (0..columns)
+        .map(|index| usable * weights.get(index).copied().unwrap_or(1.0) / total_weight)
+        .collect();
+    let header_height = 28.0;
+    let mut result = TableResult::default();
+
+    let paint_header = |ui: &egui::Ui, origin: egui::Pos2, background: Option<egui::Color32>| {
+        let painter = ui.painter();
+        let rect = egui::Rect::from_min_size(origin, Vec2::new(width, header_height));
+        if let Some(color) = background {
+            painter.rect_filled(rect, egui::CornerRadius::ZERO, color);
+        }
+        let mut x = origin.x + tint_width;
+        for (index, header) in headers.iter().enumerate() {
+            painter.text(
+                egui::pos2(x, rect.center().y),
+                egui::Align2::LEFT_CENTER,
+                *header,
+                egui::FontId::proportional(theme::FONT_CAPTION),
+                t.text_tertiary,
+            );
+            x += widths[index] + gap;
+        }
+        painter.hline(
+            rect.x_range(),
+            rect.bottom(),
+            Stroke::new(1.0, t.border_subtle),
+        );
+        rect
+    };
+
+    let header_origin = ui.cursor().min;
+    ui.allocate_exact_size(Vec2::new(width, header_height), Sense::hover());
+    let header_rect = paint_header(ui, header_origin, None);
+
+    let mut ranges: Vec<(f32, f32)> = Vec::with_capacity(columns);
+    let mut x = header_origin.x + tint_width;
+    for column_width in widths.iter().take(columns) {
+        ranges.push((x, x + column_width));
+        x += column_width + gap;
+    }
+
+    for (index, row) in rows.iter().enumerate() {
+        let origin = ui.cursor().min;
+        let (rect, _) = ui.allocate_exact_size(Vec2::new(width, theme::ROW_HEIGHT), Sense::hover());
+        let response = ui.interact(rect, ui.scope_id().with((id, index)), Sense::click());
+        if response.hovered() {
+            ui.painter()
+                .rect_filled(rect, egui::CornerRadius::ZERO, t.accent_subtle);
+        }
+        if let Some(tint) = row.tint {
+            let bar = egui::Rect::from_min_size(rect.min, Vec2::new(tint_width, rect.height()));
+            ui.painter()
+                .rect_filled(bar, egui::CornerRadius::ZERO, tint);
+        }
+        let mut truncated: Option<String> = None;
+        let mut cell_x = origin.x + tint_width;
+        for (column, cell) in row.cells.iter().enumerate().take(columns) {
+            let cell_rect = egui::Rect::from_min_size(
+                egui::pos2(cell_x, rect.top()),
+                Vec2::new(widths[column], rect.height()),
+            );
+            paint_cell(ui, &t, cell_rect, cell, &mut truncated);
+            cell_x += widths[column] + gap;
+        }
+        ui.painter().hline(
+            rect.x_range(),
+            rect.bottom(),
+            Stroke::new(1.0, t.border_subtle),
+        );
+
+        if let Some((icon, hover)) = &row.action {
+            let action_rect = egui::Rect::from_center_size(
+                egui::pos2(rect.right() - action_width / 2.0, rect.center().y),
+                Vec2::splat(theme::SPACE_6),
+            );
+            let action = ui.interact(
+                action_rect,
+                ui.scope_id().with((id, index, "action")),
+                Sense::click(),
+            );
+            let color = if action.hovered() {
+                t.text_primary
+            } else {
+                t.text_tertiary
+            };
+            theme::paint_icon(
+                ui.painter(),
+                action_rect.shrink(theme::SPACE_1),
+                *icon,
+                color,
+            );
+            if action.clicked() {
+                result.action_row = Some(index);
+                result.action_pos = Some(action_rect.left_bottom());
+            }
+            if action.hovered() {
+                action.clone().on_hover_text(hover);
+            }
+        }
+
+        if response.double_clicked() {
+            result.double_clicked_row = Some(index);
+        } else if response.clicked() {
+            result.clicked_row = Some(index);
+            if let Some(pointer) = response.interact_pointer_pos() {
+                let column = ranges
+                    .iter()
+                    .position(|(start, end)| pointer.x >= *start && pointer.x <= *end)
+                    .unwrap_or(0);
+                if let Some(cell) = row.cells.get(column) {
+                    ui.ctx().copy_text(cell.copy_text());
+                }
+            }
+        }
+        if response.secondary_clicked()
+            && let Some(pointer) = response.interact_pointer_pos()
+        {
+            let column = ranges
+                .iter()
+                .position(|(start, end)| pointer.x >= *start && pointer.x <= *end)
+                .unwrap_or(0);
+            ui.memory_mut(|memory| {
+                memory
+                    .data
+                    .insert_temp(egui::Id::unique((id, "context-cell")), column);
+            });
+        }
+        if response.hovered()
+            && let Some(text) = truncated
+        {
+            response.show_tooltip_text(text);
+        }
+        let menu_cell = egui::Id::unique((id, "context-cell"));
+        response.context_menu(|ui| {
+            let column = ui
+                .memory(|memory| memory.data.get_temp::<usize>(menu_cell))
+                .unwrap_or(0);
+            if ui.button(i18n.t("table.copy_cell")).clicked() {
+                if let Some(cell) = row.cells.get(column) {
+                    ui.ctx().copy_text(cell.copy_text());
+                }
+                ui.close();
+            }
+            if ui.button(i18n.t("table.copy_row")).clicked() {
+                ui.ctx().copy_text(row.copy.clone());
+                ui.close();
+            }
+        });
+    }
+
+    if sticky_header {
+        let clip = ui.clip_rect();
+        if header_rect.bottom() < clip.top() && clip.top() < ui.cursor().top() {
+            paint_header(
+                ui,
+                egui::pos2(header_rect.left(), clip.top()),
+                Some(t.canvas),
+            );
+        }
+    }
+
+    result
 }
 
 /// Empty state: 32 px icon, 15 px title, 12 px description, optional action.
@@ -483,33 +895,30 @@ pub fn metric(
     detail: Option<String>,
 ) -> egui::Response {
     let t = theme::theme(ui);
-    let response = ui
-        .vertical(|ui| {
-            ui.label(
-                RichText::new(label)
-                    .size(theme::FONT_CAPTION)
-                    .color(t.text_secondary),
-            );
+    ui.vertical(|ui| {
+        ui.label(
+            RichText::new(label)
+                .size(theme::FONT_CAPTION)
+                .color(t.text_secondary),
+        );
+        ui.add_space(theme::SPACE_1);
+        ui.label(theme::numeral(value, t));
+        if let Some(detail) = detail {
             ui.add_space(theme::SPACE_1);
-            ui.label(theme::numeral(value, t));
-            if let Some(detail) = detail {
-                ui.add_space(theme::SPACE_1);
-                ui.add(
-                    egui::Label::new(
-                        RichText::new(detail)
-                            .size(theme::FONT_CAPTION)
-                            .color(t.text_tertiary),
-                    )
-                    .truncate(),
-                );
-            }
-        })
-        .response;
-    response
+            ui.add(
+                egui::Label::new(
+                    RichText::new(detail)
+                        .size(theme::FONT_CAPTION)
+                        .color(t.text_tertiary),
+                )
+                .truncate(),
+            );
+        }
+    })
+    .response
 }
 
 pub fn filter_input(ui: &mut egui::Ui, i18n: I18n, value: &mut String) -> egui::Response {
-    let t = theme::theme(ui);
     ui.horizontal(|ui| {
         theme::icon_widget(ui, Icon::Search, 16.0);
         let response = ui.add(

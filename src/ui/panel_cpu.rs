@@ -121,7 +121,7 @@ pub fn show(ui: &mut egui::Ui, state: &mut AppState, i18n: I18n) {
 
 fn core_column(
     ui: &mut egui::Ui,
-    cores: &[crate::device_query::CpuCore],
+    cores: &[crate::device_query::cpu::CpuCore],
     i18n: I18n,
     t: &theme::Theme,
 ) {

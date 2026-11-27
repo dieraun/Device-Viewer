@@ -166,8 +166,10 @@ mod win {
         // SAFETY: info.monitorInfo.cbSize 已初始化，monitor 是回调参数。
         if unsafe { GetMonitorInfoW(monitor, &mut info.monitorInfo) }.as_bool() {
             let id = wide_to_string(&info.szDevice);
-            let mut mode = DEVMODEW::default();
-            mode.dmSize = std::mem::size_of::<DEVMODEW>() as u16;
+            let mut mode = DEVMODEW {
+                dmSize: std::mem::size_of::<DEVMODEW>() as u16,
+                ..Default::default()
+            };
             // SAFETY: mode.dmSize 已初始化，设备名来自刚查询到的 szDevice。
             let has_mode = unsafe {
                 EnumDisplaySettingsW(

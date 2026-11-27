@@ -60,16 +60,28 @@ pub fn show(ui: &mut egui::Ui, state: &mut AppState, i18n: I18n) {
     ui.add_space(8.0);
     widgets::card(ui, |ui| {
         ui.label(RichText::new("Limits").strong());
-        egui::Grid::new("opengl-limits")
-            .num_columns(2)
-            .striped(true)
-            .show(ui, |ui| {
-                for (name, value) in &info.limits {
-                    ui.monospace(name);
-                    ui.label(value.to_string());
-                    ui.end_row();
-                }
-            });
+        let rows: Vec<widgets::Row> = info
+            .limits
+            .iter()
+            .map(|(name, value)| {
+                widgets::Row::new(vec![
+                    widgets::Cell::Mono(name.clone()),
+                    widgets::Cell::Text(value.to_string()),
+                ])
+            })
+            .collect();
+        let table = widgets::data_table(
+            ui,
+            i18n,
+            "opengl-limits",
+            &[i18n.t("common.name"), i18n.t("common.value")],
+            &[2.6, 1.0],
+            &rows,
+            false,
+        );
+        if table.clicked_row.is_some() {
+            state.ui.notify(i18n.t("toast.copied"));
+        }
     });
 
     ui.add_space(8.0);

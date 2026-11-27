@@ -113,30 +113,38 @@ pub fn show(ui: &mut egui::Ui, state: &mut AppState, i18n: I18n) {
                 ),
             );
         });
-        egui::Grid::new("display-adapters")
-            .num_columns(3)
-            .striped(true)
-            .show(ui, |ui| {
-                for header in [
-                    i18n.t("common.name"),
-                    i18n.t("common.vendor"),
-                    i18n.t("common.vram"),
-                ] {
-                    ui.label(RichText::new(header).weak());
-                }
-                ui.end_row();
-                for adapter in &info.adapters {
-                    ui.label(&adapter.name);
-                    ui.label(adapter.vendor.clone().unwrap_or_else(|| "-".to_string()));
-                    ui.label(
+        let rows: Vec<widgets::Row> = info
+            .adapters
+            .iter()
+            .map(|adapter| {
+                widgets::Row::new(vec![
+                    widgets::Cell::Text(adapter.name.clone()),
+                    widgets::Cell::Muted(adapter.vendor.clone().unwrap_or_else(|| "-".to_string())),
+                    widgets::Cell::Text(
                         adapter
                             .vram_bytes
                             .map(|value| format_bytes(value, units))
                             .unwrap_or_else(|| "-".to_string()),
-                    );
-                    ui.end_row();
-                }
-            });
+                    ),
+                ])
+            })
+            .collect();
+        let table = widgets::data_table(
+            ui,
+            i18n,
+            "display-adapters",
+            &[
+                i18n.t("common.name"),
+                i18n.t("common.vendor"),
+                i18n.t("common.vram"),
+            ],
+            &[2.0, 1.4, 1.0],
+            &rows,
+            false,
+        );
+        if table.clicked_row.is_some() {
+            state.ui.notify(i18n.t("toast.copied"));
+        }
     });
 
     widgets::warnings(ui, i18n, "display-warnings", &info.warnings);

@@ -108,52 +108,14 @@ impl Page {
             Self::Settings => "page.settings.sub",
         }
     }
-
-    pub const fn icon(self) -> &'static str {
-        match self {
-            Self::Overview => "◈",
-            Self::Cpu => "▣",
-            Self::Pcie => "▤",
-            Self::Vulkan => "◆",
-            Self::OpenGl => "◇",
-            Self::OpenCl => "◉",
-            Self::Npu => "✦",
-            Self::Usb => "⌘",
-            Self::Storage => "▥",
-            Self::Display => "▭",
-            Self::DirectX => "▷",
-            Self::Metal => "◐",
-            Self::OpenVx => "◍",
-            Self::Sensors => "◔",
-            Self::Network => "⇄",
-            Self::Audio => "♪",
-            Self::Checklist => "☑",
-            Self::Dev => "⌨",
-            Self::Snapshots => "❐",
-            Self::Compare => "⇋",
-            Self::About => "ⓘ",
-            Self::Updates => "⇧",
-            Self::Settings => "⚙",
-        }
-    }
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
 #[serde(default)]
 pub struct FilterSettings {
     pub pcie_text: String,
     pub usb_text: String,
     pub extension_text: String,
-}
-
-impl Default for FilterSettings {
-    fn default() -> Self {
-        Self {
-            pcie_text: String::new(),
-            usb_text: String::new(),
-            extension_text: String::new(),
-        }
-    }
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Default)]
@@ -173,14 +135,6 @@ impl ThemeMode {
             Self::System => "theme.system",
             Self::Dark => "theme.dark",
             Self::Light => "theme.light",
-        }
-    }
-
-    pub const fn icon(self) -> &'static str {
-        match self {
-            Self::System => "◐",
-            Self::Dark => "☾",
-            Self::Light => "☀",
         }
     }
 
@@ -311,16 +265,11 @@ impl SnapshotEntry {
     }
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
 pub enum CodeLanguage {
     C,
+    #[default]
     Rust,
-}
-
-impl Default for CodeLanguage {
-    fn default() -> Self {
-        Self::Rust
-    }
 }
 
 #[derive(Debug, Clone, Copy, PartialEq)]
@@ -358,7 +307,6 @@ impl PermissionReport {
     }
 }
 
-#[derive(Debug, Clone)]
 /// Severity of a transient notification.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum ToastKind {
@@ -404,6 +352,8 @@ pub struct UiState {
     pub pending_delete: Option<String>,
     /// Snapshot whose row menu (compare/tags/delete) is open.
     pub snapshot_menu: Option<String>,
+    /// 行菜单弹出的屏幕坐标，菜单跨帧保持打开时需要复用。
+    pub snapshot_menu_pos: Option<egui::Pos2>,
     /// Transient notifications, oldest first.
     pub toasts: Vec<Toast>,
     pub request_update_check: bool,
@@ -427,6 +377,7 @@ impl Default for UiState {
             tag_edit_buffer: String::new(),
             pending_delete: None,
             snapshot_menu: None,
+            snapshot_menu_pos: None,
             toasts: Vec::new(),
             request_update_check: false,
         }
@@ -442,6 +393,21 @@ impl UiState {
     /// Pushes a toast with an explicit severity.
     pub fn notify_kind(&mut self, text: impl Into<String>, kind: ToastKind) {
         self.push_toast(text.into(), kind, None);
+    }
+
+    /// Pushes a success toast, used by actions that completed as asked.
+    pub fn notify_success(&mut self, text: impl Into<String>) {
+        self.notify_kind(text, ToastKind::Success);
+    }
+
+    /// Pushes a warning toast: the action finished but something is off.
+    pub fn notify_warning(&mut self, text: impl Into<String>) {
+        self.notify_kind(text, ToastKind::Warning);
+    }
+
+    /// Pushes an error toast: the action did not complete.
+    pub fn notify_error(&mut self, text: impl Into<String>) {
+        self.notify_kind(text, ToastKind::Error);
     }
 
     /// Pushes a toast that jumps to `page` when clicked.
@@ -518,9 +484,7 @@ impl AppState {
             (None, None) => (SavedConfig::default(), false),
         };
 
-        if portable_override {
-            config.settings.portable = true;
-        } else if used_portable_file {
+        if portable_override || used_portable_file {
             config.settings.portable = true;
         }
         config.settings.normalize();
@@ -670,7 +634,7 @@ impl AppState {
             }
         }
 
-        entries.sort_by(|left, right| right.created_at_unix_ms.cmp(&left.created_at_unix_ms));
+        entries.sort_by_key(|entry| std::cmp::Reverse(entry.created_at_unix_ms));
         self.snapshots = entries;
     }
 
@@ -1312,13 +1276,13 @@ fn is_elevated() -> bool {
     {
         // Keep the probe out of unit tests: it reads the process token and its
         // result is irrelevant for the path/snapshot tests below.
-        return false;
+        false
     }
     #[cfg(not(test))]
     {
         #[cfg(target_os = "windows")]
         {
-            return windows_elevated();
+            windows_elevated()
         }
 
         #[cfg(not(target_os = "windows"))]
@@ -1410,7 +1374,7 @@ fn windows_elevated() -> bool {
 fn report_token_error(call: &str, code: u32) {
     const ERROR_ACCESS_DENIED: u32 = 5;
     if code != ERROR_ACCESS_DENIED {
-        log::warn(format!("{call} failed with error {code}"));
+        crate::log::warn(format!("{call} failed with error {code}"));
     }
 }
 

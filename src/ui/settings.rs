@@ -205,7 +205,8 @@ pub fn show(ui: &mut egui::Ui, state: &mut AppState, i18n: I18n) {
         ui.add_space(theme::SECTION_GAP);
         widgets::card(ui, |ui| {
             ui.horizontal(|ui| {
-                if widgets::icon_text_button(ui, theme::Icon::Refresh, i18n.t("settings.reset"))
+                if ui
+                    .add(widgets::secondary_button(i18n.t("settings.reset")))
                     .clicked()
                 {
                     state.settings = Settings {

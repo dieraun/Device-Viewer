@@ -27,7 +27,7 @@ const UPDATE_USER_AGENT: &str = "device-viewer";
 enum QueryEvent {
     Snapshot {
         generation: u64,
-        snapshot: HardwareSnapshot,
+        snapshot: Box<HardwareSnapshot>,
     },
     Gpu {
         generation: u64,
@@ -209,7 +209,7 @@ impl DeviceViewerApp {
             // 因此被取消的旧任务不可能把过期数据写回界面。
             let _ = sender.send(QueryEvent::Snapshot {
                 generation,
-                snapshot,
+                snapshot: Box::new(snapshot),
             });
         });
     }
@@ -280,7 +280,7 @@ impl DeviceViewerApp {
                         continue;
                     }
                     self.busy = false;
-                    self.state.snapshot = snapshot;
+                    self.state.snapshot = *snapshot;
                     // 新一轮采集结果需要重新从渲染上下文取 OpenGL 身份。
                     self.opengl_probed = false;
                     self.state.record_gpu_sample();
@@ -398,21 +398,27 @@ impl DeviceViewerApp {
             "device-viewer-export-{timestamp}.{}",
             self.export_format.extension()
         ));
-        if let Some(parent) = path.parent() {
-            if let Err(error) = std::fs::create_dir_all(parent) {
-                log::error(format!("cannot create export directory: {error}"));
-                self.state.ui.notify(format!("export failed: {error}"));
-                return;
-            }
+        if let Some(parent) = path.parent()
+            && let Err(error) = std::fs::create_dir_all(parent)
+        {
+            log::error(format!("cannot create export directory: {error}"));
+            self.state
+                .ui
+                .notify_error(format!("export failed: {error}"));
+            return;
         }
         match std::fs::write(&path, &self.export_preview) {
             Ok(()) => {
-                self.state.ui.notify(format!("Saved {}", path.display()));
+                self.state
+                    .ui
+                    .notify_success(format!("Saved {}", path.display()));
                 log::info(format!("exported report to {}", path.display()));
             }
             Err(error) => {
                 log::error(format!("cannot write export {}: {error}", path.display()));
-                self.state.ui.notify(format!("export failed: {error}"));
+                self.state
+                    .ui
+                    .notify_error(format!("export failed: {error}"));
             }
         }
     }
@@ -422,14 +428,15 @@ impl DeviceViewerApp {
         if !self.palette_open {
             return;
         }
-        let t = theme::Theme::of(ctx.style().visuals.dark_mode);
+        let t = theme::Theme::of(ctx.theme() == egui::Theme::Dark);
         let mut open = true;
         let mut chosen: Option<PaletteAction> = None;
         egui::Window::new(self.i18n.t("shell.palette"))
-            .id(egui::Id::new("command-palette"))
+            .id(egui::Id::unique("command-palette"))
             .open(&mut open)
             .anchor(egui::Align2::CENTER_TOP, [0.0, 96.0])
-            .fixed_width(520.0)
+            .min_width(520.0)
+            .max_width(520.0)
             .resizable(false)
             .frame(t.overlay_frame())
             .show(ctx, |ui| {
@@ -502,11 +509,7 @@ impl DeviceViewerApp {
                 PaletteAction::Refresh => self.start_query(),
                 PaletteAction::Export => self.open_export(),
                 PaletteAction::ToggleTheme => {
-                    self.state.settings.theme = match self.state.settings.theme {
-                        ThemeMode::System => ThemeMode::Dark,
-                        ThemeMode::Dark => ThemeMode::Light,
-                        ThemeMode::Light => ThemeMode::System,
-                    };
+                    self.state.settings.theme = self.state.settings.theme.cycle();
                     self.state.mark_dirty();
                 }
             }
@@ -668,10 +671,18 @@ impl DeviceViewerApp {
                         }
                     }
                     ui.separator();
-                    if ui.button(self.i18n.t("app.copy")).clicked() {
+                    if ui
+                        .add(crate::ui::widgets::ghost_button(self.i18n.t("app.copy")))
+                        .clicked()
+                    {
                         ui.ctx().copy_text(self.export_preview.clone());
                     }
-                    if ui.button(self.i18n.t("common.save")).clicked() {
+                    if ui
+                        .add(crate::ui::widgets::primary_button(
+                            self.i18n.t("common.save"),
+                        ))
+                        .clicked()
+                    {
                         self.save_export();
                     }
                 });
@@ -735,7 +746,7 @@ impl DeviceViewerApp {
         if !self.more_open {
             return;
         }
-        let t = ui::theme::Theme::of(ctx.style().visuals.dark_mode);
+        let t = ui::theme::Theme::of(ctx.theme() == egui::Theme::Dark);
         let mut window_open = true;
         let mut close_now = false;
         egui::Window::new(self.i18n.t("shell.more"))
@@ -894,6 +905,7 @@ impl eframe::App for DeviceViewerApp {
             self.export_open = false;
             self.palette_open = false;
             self.state.ui.snapshot_menu = None;
+            self.state.ui.snapshot_menu_pos = None;
         }
 
         self.palette_window(&ctx);
@@ -901,9 +913,9 @@ impl eframe::App for DeviceViewerApp {
         self.export_window(&ctx);
         self.state.ui.prune_toasts();
         if !self.state.ui.toasts.is_empty() {
-            let t = ui::theme::Theme::of(ctx.style().visuals.dark_mode);
+            let t = ui::theme::Theme::of(ctx.theme() == egui::Theme::Dark);
             let mut jump = None;
-            egui::Area::new(egui::Id::new("toasts"))
+            egui::Area::new(egui::Id::unique("toasts"))
                 .anchor(
                     egui::Align2::RIGHT_BOTTOM,
                     [-theme::SPACE_6, -theme::SPACE_6],

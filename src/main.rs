@@ -12,7 +12,7 @@ mod state;
 mod ui;
 
 use std::collections::BTreeSet;
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 use std::process::ExitCode;
 
 use device_query::{HardwareSnapshot, QueryOptions, collect_all};
@@ -30,8 +30,7 @@ USAGE:
 OPTIONS:
     --cli                 Force the batch/CLI mode (implied by --out/--only/--snapshot).
     --out <PATH>          Write .txt, .md/.markdown or .json, chosen from the
-                          extension; "
-    - " writes to standard output.
+                          extension; \u{22}-\u{22} writes to standard output.
     --only <LIST>         Comma-separated modules: cpu,memory,pcie,vulkan,opengl,
                           opencl,npu,usb,storage,motherboard,display,directx,metal,
                           openvx,system,network,audio,sensors,bandwidth.
@@ -248,11 +247,11 @@ fn run_cli(cli: &Cli) -> Result<(), String> {
         if to_stdout {
             print!("{body}");
         } else {
-            if let Some(parent) = path.parent() {
-                if !parent.as_os_str().is_empty() {
-                    std::fs::create_dir_all(parent)
-                        .map_err(|error| format!("cannot create {}: {error}", parent.display()))?;
-                }
+            if let Some(parent) = path.parent()
+                && !parent.as_os_str().is_empty()
+            {
+                std::fs::create_dir_all(parent)
+                    .map_err(|error| format!("cannot create {}: {error}", parent.display()))?;
             }
             std::fs::write(path, body)
                 .map_err(|error| format!("cannot write {}: {error}", path.display()))?;
@@ -313,7 +312,7 @@ fn read_snapshot(path: &PathBuf) -> Result<HardwareSnapshot, String> {
 
 /// The extension decides the format, and an unknown one is an error: silently
 /// writing plain text into `report.yaml` produces a file that lies about itself.
-fn format_for(path: &PathBuf) -> Result<ExportFormat, String> {
+fn format_for(path: &Path) -> Result<ExportFormat, String> {
     match path
         .extension()
         .and_then(|extension| extension.to_str())

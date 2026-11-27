@@ -150,14 +150,6 @@ impl Theme {
             })
     }
 
-    /// A quiet inset block used for grouping inside a card.
-    pub fn inset_frame(self) -> egui::Frame {
-        egui::Frame::new()
-            .fill(self.raised)
-            .corner_radius(CornerRadius::same(RADIUS_CONTROL))
-            .inner_margin(egui::Margin::symmetric(SPACE_3 as i8, SPACE_2 as i8))
-    }
-
     pub fn body_font(self) -> FontId {
         FontId::proportional(FONT_BODY)
     }
@@ -263,6 +255,10 @@ fn widget_visuals(
 }
 
 /// Vector icons. Glyph characters are never used as icons.
+///
+/// The set is a small design system; a few glyphs (trash, save, update and the
+/// chevrons) are drawn for screens that land in 1.4, hence the allowance.
+#[allow(dead_code)]
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Icon {
     Overview,
@@ -511,10 +507,7 @@ pub fn paint_icon(painter: &egui::Painter, rect: Rect, icon: Icon, color: Color3
 /// A single icon rendered as a widget.
 pub fn icon_widget(ui: &mut egui::Ui, icon: Icon, size: f32) -> egui::Response {
     let (response, painter) = ui.allocate_painter(Vec2::splat(size), egui::Sense::hover());
-    let color = ui
-        .visuals()
-        .weak_text_color()
-        .unwrap_or(ui.visuals().text_color());
+    let color = ui.visuals().weak_text_color();
     paint_icon(&painter, response.rect, icon, color);
     response
 }

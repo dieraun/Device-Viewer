@@ -181,35 +181,47 @@ pub fn show(ui: &mut egui::Ui, state: &mut AppState, i18n: I18n) {
                     },
                 );
             });
-            egui::Grid::new("vulkan-heaps")
-                .num_columns(4)
-                .striped(true)
-                .spacing([20.0, 5.0])
-                .show(ui, |ui| {
-                    ui.label(RichText::new("#").weak());
-                    ui.label(RichText::new(i18n.t("common.size")).weak());
-                    ui.label(RichText::new(i18n.t("common.device_local")).weak());
-                    ui.label(RichText::new(i18n.t("common.value")).weak());
-                    ui.end_row();
-                    for heap in &device.heaps {
-                        ui.label(heap.index.to_string());
-                        ui.label(format_bytes(heap.size_bytes, units));
-                        ui.label(if heap.device_local {
-                            i18n.t("app.yes")
-                        } else {
-                            i18n.t("app.no")
-                        });
-                        ui.add(
-                            egui::ProgressBar::new(if device.total_memory_bytes == 0 {
-                                0.0
+            let rows: Vec<widgets::Row> = device
+                .heaps
+                .iter()
+                .map(|heap| {
+                    let fraction = if device.total_memory_bytes == 0 {
+                        0.0
+                    } else {
+                        heap.size_bytes as f32 / device.total_memory_bytes as f32
+                    };
+                    widgets::Row::new(vec![
+                        widgets::Cell::Muted(heap.index.to_string()),
+                        widgets::Cell::Mono(format_bytes(heap.size_bytes, units)),
+                        widgets::Cell::Text(
+                            i18n.t(if heap.device_local {
+                                "app.yes"
                             } else {
-                                heap.size_bytes as f32 / device.total_memory_bytes as f32
+                                "app.no"
                             })
-                            .desired_width(180.0),
-                        );
-                        ui.end_row();
-                    }
-                });
+                            .to_string(),
+                        ),
+                        widgets::Cell::Bar(fraction),
+                    ])
+                })
+                .collect();
+            let table = widgets::data_table(
+                ui,
+                i18n,
+                "vulkan-heaps",
+                &[
+                    "#",
+                    i18n.t("common.size"),
+                    i18n.t("common.device_local"),
+                    i18n.t("common.value"),
+                ],
+                &[0.5, 1.2, 1.2, 2.4],
+                &rows,
+                false,
+            );
+            if table.clicked_row.is_some() {
+                state.ui.notify(i18n.t("toast.copied"));
+            }
         });
 
         ui.add_space(8.0);

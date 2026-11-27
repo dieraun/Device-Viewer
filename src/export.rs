@@ -937,6 +937,35 @@ fn yes_no(value: bool, i18n: I18n) -> &'static str {
     }
 }
 
+/// Converts exported Markdown into a tab separated plain text table.
+fn markdown_to_text(markdown: &str) -> String {
+    let mut output = String::new();
+    for line in markdown.lines() {
+        let trimmed = line.trim();
+        if trimmed.starts_with("| ---") || trimmed.starts_with("|---") {
+            continue;
+        }
+        if trimmed.starts_with('|') {
+            // escape_cell 把单元格内的 | 转义成 \|；先换成占位符再按未转义
+            // 的竖线切分，否则含 | 的设备名会被拆成错位的多列。
+            let protected = trimmed.replace("\\|", "\u{0}");
+            let cells: Vec<String> = protected
+                .trim_matches('|')
+                .split('|')
+                .map(|cell| cell.trim().replace('\u{0}', "|"))
+                .collect();
+            output.push_str(&cells.join("\t"));
+            output.push('\n');
+            continue;
+        }
+        let cleaned = trimmed.trim_start_matches('#').trim();
+        let cleaned = cleaned.replace("**", "").replace('`', "");
+        output.push_str(&cleaned);
+        output.push('\n');
+    }
+    output
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -976,9 +1005,11 @@ mod tests {
 
     #[test]
     fn json_export_round_trips_through_the_snapshot_parser() {
-        let mut snapshot = HardwareSnapshot::default();
-        snapshot.captured_at_unix_ms = 42;
-        snapshot.elapsed_ms = 7;
+        let snapshot = HardwareSnapshot {
+            captured_at_unix_ms: 42,
+            elapsed_ms: 7,
+            ..Default::default()
+        };
         let json = render(
             &snapshot,
             ExportFormat::Json,
@@ -990,32 +1021,4 @@ mod tests {
         assert_eq!(decoded.captured_at_unix_ms, 42);
         assert_eq!(decoded.elapsed_ms, 7);
     }
-}
-/// Converts exported Markdown into a tab separated plain text table.
-fn markdown_to_text(markdown: &str) -> String {
-    let mut output = String::new();
-    for line in markdown.lines() {
-        let trimmed = line.trim();
-        if trimmed.starts_with("| ---") || trimmed.starts_with("|---") {
-            continue;
-        }
-        if trimmed.starts_with('|') {
-            // escape_cell 把单元格内的 | 转义成 \|；先换成占位符再按未转义
-            // 的竖线切分，否则含 | 的设备名会被拆成错位的多列。
-            let protected = trimmed.replace("\\|", "\u{0}");
-            let cells: Vec<String> = protected
-                .trim_matches('|')
-                .split('|')
-                .map(|cell| cell.trim().replace('\u{0}', "|"))
-                .collect();
-            output.push_str(&cells.join("\t"));
-            output.push('\n');
-            continue;
-        }
-        let cleaned = trimmed.trim_start_matches('#').trim();
-        let cleaned = cleaned.replace("**", "").replace('`', "");
-        output.push_str(&cleaned);
-        output.push('\n');
-    }
-    output
 }

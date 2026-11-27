@@ -31,10 +31,10 @@ pub struct UsbInfo {
 pub async fn query(cancel: &CancellationToken) -> QueryResult<UsbInfo> {
     let mut info = super::run_blocking("usb", cancel, platform_query).await?;
     for device in &mut info.devices {
-        if device.vendor.is_none() {
-            if let Some(vendor) = device.vendor_id.and_then(vendor_map::usb_vendor_name) {
-                device.vendor = Some(vendor.to_string());
-            }
+        if device.vendor.is_none()
+            && let Some(vendor) = device.vendor_id.and_then(vendor_map::usb_vendor_name)
+        {
+            device.vendor = Some(vendor.to_string());
         }
     }
     Ok(info)
@@ -106,7 +106,7 @@ mod linux {
             });
         }
 
-        devices.sort_by(|left, right| (left.bus, left.address).cmp(&(right.bus, right.address)));
+        devices.sort_by_key(|device| (device.bus, device.address));
         if devices.is_empty() {
             warnings.push("no USB devices were reported by sysfs".to_string());
         }
@@ -245,7 +245,7 @@ mod win {
             });
         }
 
-        devices.sort_by(|left, right| (left.bus, left.address).cmp(&(right.bus, right.address)));
+        devices.sort_by_key(|device| (device.bus, device.address));
         if devices.is_empty() {
             warnings.push("no USB devices were reported by SetupAPI".to_string());
         }
@@ -301,8 +301,10 @@ mod win {
 
     fn decode_utf16(bytes: &[u8]) -> Option<String> {
         let words: Vec<u16> = bytes
-            .chunks_exact(2)
-            .map(|pair| u16::from_le_bytes([pair[0], pair[1]]))
+            .as_chunks::<2>()
+            .0
+            .iter()
+            .map(|pair| u16::from_le_bytes(*pair))
             .take_while(|word| *word != 0)
             .collect();
         if words.is_empty() {

@@ -110,8 +110,10 @@ async fn full_collection_isolates_module_failures() {
 #[test]
 fn non_finite_telemetry_is_sanitized_before_serialization() {
     let mut snapshot = HardwareSnapshot::default();
-    let mut cpu = device_query::cpu::CpuInfo::default();
-    cpu.global_usage_percent = f32::NAN;
+    let mut cpu = device_query::cpu::CpuInfo {
+        global_usage_percent: f32::NAN,
+        ..Default::default()
+    };
     cpu.cores.push(device_query::cpu::CpuCore {
         id: 0,
         usage_percent: f32::INFINITY,

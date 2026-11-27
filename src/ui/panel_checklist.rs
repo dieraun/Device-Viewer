@@ -232,34 +232,43 @@ pub fn show(ui: &mut egui::Ui, state: &mut AppState, i18n: I18n) {
     ui.add_space(6.0);
 
     widgets::page_body(ui, |ui| {
-        egui::Grid::new("checklist-grid")
-            .num_columns(3)
-            .striped(true)
-            .spacing([16.0, 6.0])
-            .show(ui, |ui| {
-                for header in [
-                    i18n.t("common.page"),
-                    i18n.t("common.status"),
-                    i18n.t("common.detail"),
-                ] {
-                    ui.label(RichText::new(header).weak());
-                }
-                ui.end_row();
-                for row in &rows {
-                    ui.label(i18n.t(row.page.title_key()));
-                    if row.available {
-                        widgets::badge(ui, i18n.t("app.available"), widgets::BadgeKind::Ok);
-                    } else {
-                        widgets::badge(
-                            ui,
-                            i18n.t("app.not_available"),
-                            widgets::BadgeKind::Warning,
-                        );
-                    }
-                    ui.label(&row.detail);
-                    ui.end_row();
-                }
-            });
+        let table_rows: Vec<widgets::Row> = rows
+            .iter()
+            .map(|row| {
+                let status = if row.available {
+                    widgets::Cell::Badge(
+                        i18n.t("app.available").to_string(),
+                        widgets::BadgeKind::Ok,
+                    )
+                } else {
+                    widgets::Cell::Badge(
+                        i18n.t("app.not_available").to_string(),
+                        widgets::BadgeKind::Warning,
+                    )
+                };
+                widgets::Row::new(vec![
+                    widgets::Cell::Text(i18n.t(row.page.title_key()).to_string()),
+                    status,
+                    widgets::Cell::Muted(row.detail.clone()),
+                ])
+            })
+            .collect();
+        let table = widgets::data_table(
+            ui,
+            i18n,
+            "checklist-grid",
+            &[
+                i18n.t("common.page"),
+                i18n.t("common.status"),
+                i18n.t("common.detail"),
+            ],
+            &[1.4, 1.0, 3.0],
+            &table_rows,
+            false,
+        );
+        if table.clicked_row.is_some() {
+            state.ui.notify(i18n.t("toast.copied"));
+        }
     });
 
     if !state.permission.items.is_empty() {

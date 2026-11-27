@@ -25,9 +25,15 @@ pub fn show(ui: &mut egui::Ui, state: &mut AppState, i18n: I18n) {
                         .notify_page(format!("Imported {}", entry.label), Page::Snapshots);
                 }
                 Err(error) => {
-                    state.ui.notify(error);
+                    state.ui.notify_error(error);
                 }
             }
+        } else if let Some(name) = path.file_name() {
+            state.ui.notify_warning(format!(
+                "{}: {}",
+                name.to_string_lossy(),
+                i18n.t("snapshot.unsupported")
+            ));
         }
     }
 
@@ -63,7 +69,7 @@ pub fn show(ui: &mut egui::Ui, state: &mut AppState, i18n: I18n) {
                         state.ui.tag_buffer.clear();
                     }
                     Err(error) => {
-                        state.ui.notify(error);
+                        state.ui.notify_error(error);
                     }
                 }
             }
@@ -79,7 +85,7 @@ pub fn show(ui: &mut egui::Ui, state: &mut AppState, i18n: I18n) {
         );
     });
 
-    ui.add_space(8.0);
+    ui.add_space(theme::SECTION_GAP);
     ui.horizontal(|ui| {
         widgets::badge(
             ui,
@@ -90,219 +96,163 @@ pub fn show(ui: &mut egui::Ui, state: &mut AppState, i18n: I18n) {
             state.refresh_snapshots();
         }
     });
-    ui.add_space(6.0);
+    ui.add_space(theme::SPACE_3);
 
     widgets::page_body(ui, |ui| {
         if state.snapshots.is_empty() {
-            widgets::empty(ui, i18n.t("snapshot.empty"));
-            return;
-        }
-        let entries = state.snapshots.clone();
-        let t = theme::theme(ui);
-        // 行式列表：每行只放名称、标签、时间、大小，操作收进行尾的 ⋯ 菜单。
-        widgets::card(ui, |ui| {
-            ui.horizontal(|ui| {
-                ui.label(
-                    RichText::new(format!(
-                        "{} · {}",
-                        i18n.t("common.snapshots"),
-                        entries.len()
-                    ))
-                    .size(theme::FONT_CAPTION)
-                    .color(t.text_tertiary),
-                );
-                ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-                    ui.label(
-                        RichText::new(i18n.t("snapshot.double_click"))
-                            .size(theme::FONT_CAPTION)
-                            .color(t.text_tertiary),
-                    );
-                });
-            });
-            ui.add_space(theme::SPACE_1);
-            for entry in &entries {
-                ui.push_id(&entry.file, |ui| {
-                    let (rect, response) = ui.allocate_exact_size(
-                        egui::vec2(ui.available_width(), theme::ROW_HEIGHT),
-                        egui::Sense::click(),
-                    );
-                    let menu_rect = egui::Rect::from_center_size(
-                        egui::pos2(rect.right() - 20.0, rect.center().y),
-                        egui::Vec2::splat(24.0),
-                    );
-                    let menu_response =
-                        ui.interact(menu_rect, ui.id().with("row-menu"), egui::Sense::click());
-                    let menu_open = state.ui.snapshot_menu.as_deref() == Some(entry.file.as_str());
-                    if response.hovered() || menu_open {
-                        ui.painter().rect_filled(
-                            rect,
-                            egui::CornerRadius::same(theme::RADIUS_CONTROL),
-                            t.accent_subtle,
-                        );
-                    }
-                    let label_rect = ui.painter().text(
-                        egui::pos2(rect.left() + theme::SPACE_2, rect.center().y),
-                        egui::Align2::LEFT_CENTER,
-                        &entry.label,
-                        egui::FontId::proportional(theme::FONT_BODY),
-                        t.text_primary,
-                    );
-                    if !entry.tags.is_empty() {
-                        ui.painter().text(
-                            egui::pos2(label_rect.right() + theme::SPACE_2, rect.center().y),
-                            egui::Align2::LEFT_CENTER,
-                            entry.tags.join(" · "),
-                            egui::FontId::proportional(theme::FONT_CAPTION),
-                            t.text_tertiary,
-                        );
-                    }
-                    let size_rect = ui.painter().text(
-                        egui::pos2(menu_rect.left() - theme::SPACE_3, rect.center().y),
-                        egui::Align2::RIGHT_CENTER,
-                        format!("{} KiB", entry.size_bytes.div_ceil(1024)),
-                        egui::FontId::proportional(theme::FONT_CAPTION),
-                        t.text_tertiary,
-                    );
-                    ui.painter().text(
-                        egui::pos2(size_rect.left() - theme::SPACE_3, rect.center().y),
-                        egui::Align2::RIGHT_CENTER,
-                        format_timestamp(entry.created_at_unix_ms),
-                        egui::FontId::proportional(theme::FONT_CAPTION),
-                        t.text_tertiary,
-                    );
-                    if menu_response.hovered() {
-                        ui.painter().rect_filled(
-                            menu_rect,
-                            egui::CornerRadius::same(theme::RADIUS_CONTROL),
-                            t.raised,
-                        );
-                    }
-                    theme::paint_icon(
-                        ui.painter(),
-                        menu_rect.shrink(4.0),
-                        theme::Icon::More,
-                        if menu_response.hovered() || menu_open {
-                            t.text_primary
-                        } else {
-                            t.text_tertiary
-                        },
-                    );
-                    ui.painter().hline(
-                        rect.x_range(),
-                        rect.bottom(),
-                        egui::Stroke::new(theme::BORDER_WIDTH, t.border_subtle),
-                    );
-                    let _ = response
-                        .clone()
-                        .on_hover_text(entry.path(&state.snapshots_dir).display().to_string());
+            widgets::empty_state(
+                ui,
+                theme::theme(ui),
+                theme::Icon::Snapshot,
+                i18n.t("snapshot.empty"),
+                i18n.t("snapshot.drop_hint"),
+                None,
+            );
+        } else {
+            let entries = state.snapshots.clone();
+            // 列表复用通用表格：整行 hover、单击复制单元格、右键复制整行（复制内容为完整路径）。
+            let rows: Vec<widgets::Row> = entries
+                .iter()
+                .map(|entry| {
+                    let mut row = widgets::Row::new(vec![
+                        widgets::Cell::Strong(entry.label.clone()),
+                        widgets::Cell::Muted(entry.tags.join(" · ")),
+                        widgets::Cell::Muted(format_timestamp(entry.created_at_unix_ms)),
+                        widgets::Cell::Muted(format!("{} KiB", entry.size_bytes.div_ceil(1024))),
+                    ]);
+                    row.copy = entry.path(&state.snapshots_dir).display().to_string();
+                    row.with_action(theme::Icon::More, i18n.t("shell.more"))
+                })
+                .collect();
+            let table = widgets::data_table(
+                ui,
+                i18n,
+                "snapshot-table",
+                &[
+                    i18n.t("snapshot.label"),
+                    i18n.t("snapshot.tags"),
+                    i18n.t("snapshot.created"),
+                    i18n.t("snapshot.size"),
+                ],
+                &[2.4, 1.8, 1.6, 0.9],
+                &rows,
+                false,
+            );
 
-                    if response.double_clicked() {
-                        state.ui.snapshot_menu = None;
-                        if let Err(error) = state.load_compare(&entry.file) {
-                            state.ui.notify(error);
-                        } else {
-                            state.settings.page = Page::Compare;
-                        }
-                    } else if menu_response.clicked() {
-                        state.ui.snapshot_menu = if menu_open {
-                            None
-                        } else {
-                            Some(entry.file.clone())
-                        };
-                    } else if response.clicked() {
-                        state.ui.snapshot_menu = None;
-                        ui.ctx()
-                            .copy_text(entry.path(&state.snapshots_dir).display().to_string());
-                        state.ui.notify(i18n.t("toast.copied"));
+            if let Some(index) = table.double_clicked_row {
+                if let Some(entry) = entries.get(index) {
+                    state.ui.snapshot_menu = None;
+                    match state.load_compare(&entry.file) {
+                        Ok(()) => state.settings.page = Page::Compare,
+                        Err(error) => state.ui.notify_error(error),
                     }
+                }
+            } else if let Some(index) = table.action_row {
+                if let Some(entry) = entries.get(index) {
+                    let same = state.ui.snapshot_menu.as_deref() == Some(entry.file.as_str());
+                    state.ui.snapshot_menu = if same { None } else { Some(entry.file.clone()) };
+                    state.ui.snapshot_menu_pos = table.action_pos;
+                }
+            } else if table.clicked_row.is_some() {
+                state.ui.snapshot_menu = None;
+                state.ui.notify(i18n.t("toast.copied"));
+            }
 
-                    if menu_open {
-                        let mut action = 0u8;
-                        egui::Area::new(egui::Id::new("snapshot-row-menu"))
-                            .order(egui::Order::Foreground)
-                            .fixed_pos(egui::pos2(
-                                menu_rect.right() - 160.0,
-                                rect.bottom() + theme::SPACE_1,
-                            ))
-                            .show(ui.ctx(), |ui| {
-                                t.overlay_frame().show(ui, |ui| {
-                                    ui.set_min_width(160.0);
-                                    if ui.button(i18n.t("snapshot.compare")).clicked() {
-                                        action = 1;
-                                    }
-                                    if ui.button(i18n.t("snapshot.tags")).clicked() {
-                                        action = 2;
-                                    }
-                                    if ui.button(i18n.t("common.delete")).clicked() {
-                                        action = 3;
-                                    }
-                                });
-                            });
-                        match action {
-                            1 => {
-                                state.ui.snapshot_menu = None;
-                                if let Err(error) = state.load_compare(&entry.file) {
-                                    state.ui.notify(error);
-                                } else {
-                                    state.settings.page = Page::Compare;
-                                }
+            if let (Some(file), Some(pos)) =
+                (state.ui.snapshot_menu.clone(), state.ui.snapshot_menu_pos)
+                && let Some(entry) = entries.iter().find(|entry| entry.file == file)
+            {
+                let t = theme::theme(ui);
+                let mut action = 0u8;
+                egui::Area::new(egui::Id::unique("snapshot-row-menu"))
+                    .order(egui::Order::Foreground)
+                    .fixed_pos(egui::pos2(pos.x - 160.0, pos.y + theme::SPACE_1))
+                    .show(ui.ctx(), |ui| {
+                        t.overlay_frame().show(ui, |ui| {
+                            ui.set_min_width(160.0);
+                            if ui.button(i18n.t("snapshot.compare")).clicked() {
+                                action = 1;
                             }
-                            2 => {
-                                state.ui.snapshot_menu = None;
-                                // 缓冲只在打开另一个快照时重建，输入不会被每帧重置。
-                                state.ui.begin_tag_edit(&entry.file, &entry.tags);
+                            if ui.button(i18n.t("snapshot.tags")).clicked() {
+                                action = 2;
                             }
-                            3 => {
-                                state.ui.snapshot_menu = None;
-                                state.ui.pending_delete = Some(entry.file.clone());
-                            }
-                            _ => {}
-                        }
-                    }
-
-                    if state.ui.tag_edit.as_deref() == Some(entry.file.as_str()) {
-                        ui.horizontal(|ui| {
-                            ui.add_space(theme::SPACE_2);
-                            ui.add(
-                                egui::TextEdit::singleline(&mut state.ui.tag_edit_buffer)
-                                    .hint_text(i18n.t("snapshot.tags_hint")),
-                            );
-                            if ui.button(i18n.t("common.apply")).clicked() {
-                                let parsed: Vec<String> = state
-                                    .ui
-                                    .tag_edit_buffer
-                                    .split(',')
-                                    .map(|tag| tag.trim().to_string())
-                                    .filter(|tag| !tag.is_empty())
-                                    .collect();
-                                state.set_snapshot_tags(&entry.file, parsed);
-                                state.ui.tag_edit = None;
-                                state.ui.tag_edit_buffer.clear();
-                            }
-                            if ui.button(i18n.t("common.cancel")).clicked() {
-                                state.ui.tag_edit = None;
-                                state.ui.tag_edit_buffer.clear();
+                            if ui.button(i18n.t("common.delete")).clicked() {
+                                action = 3;
                             }
                         });
+                    });
+                match action {
+                    1 => {
+                        state.ui.snapshot_menu = None;
+                        match state.load_compare(&entry.file) {
+                            Ok(()) => state.settings.page = Page::Compare,
+                            Err(error) => state.ui.notify_error(error),
+                        }
                     }
+                    2 => {
+                        state.ui.snapshot_menu = None;
+                        // 缓冲只在打开另一个快照时重建，输入不会被每帧重置。
+                        state.ui.begin_tag_edit(&entry.file, &entry.tags);
+                    }
+                    3 => {
+                        state.ui.snapshot_menu = None;
+                        state.ui.pending_delete = Some(entry.file.clone());
+                    }
+                    _ => {}
+                }
+            }
+
+            if let Some(file) = state.ui.tag_edit.clone() {
+                ui.add_space(theme::SPACE_2);
+                widgets::card(ui, |ui| {
+                    ui.horizontal(|ui| {
+                        ui.label(
+                            RichText::new(i18n.t("snapshot.tags"))
+                                .size(theme::FONT_CAPTION)
+                                .color(theme::theme(ui).text_tertiary),
+                        );
+                        ui.add(
+                            egui::TextEdit::singleline(&mut state.ui.tag_edit_buffer)
+                                .hint_text(i18n.t("snapshot.tags_hint")),
+                        );
+                        if ui.button(i18n.t("common.apply")).clicked() {
+                            let parsed: Vec<String> = state
+                                .ui
+                                .tag_edit_buffer
+                                .split(',')
+                                .map(|tag| tag.trim().to_string())
+                                .filter(|tag| !tag.is_empty())
+                                .collect();
+                            state.set_snapshot_tags(&file, parsed);
+                            state.ui.tag_edit = None;
+                            state.ui.tag_edit_buffer.clear();
+                        }
+                        if ui.button(i18n.t("common.cancel")).clicked() {
+                            state.ui.tag_edit = None;
+                            state.ui.tag_edit_buffer.clear();
+                        }
+                    });
                 });
             }
-        });
+        }
     });
 
     // 删除前二次确认；只有明确点击“删除”才会真正移除文件。
     if let Some(file) = state.ui.pending_delete.clone() {
         let modal =
-            egui::Modal::new(egui::Id::new("snapshot-delete-confirm")).show(ui.ctx(), |ui| {
+            egui::Modal::new(egui::Id::unique("snapshot-delete-confirm")).show(ui.ctx(), |ui| {
                 ui.set_max_width(360.0);
                 ui.label(RichText::new(i18n.t("snapshot.delete_confirm")).strong());
-                ui.add_space(4.0);
+                ui.add_space(theme::SPACE_1);
                 ui.label(RichText::new(&file).monospace().weak());
-                ui.add_space(10.0);
+                ui.add_space(theme::SPACE_3);
                 ui.horizontal(|ui| {
                     if ui.button(i18n.t("common.delete")).clicked() {
-                        if let Err(error) = state.delete_snapshot(&file) {
-                            state.ui.notify(error);
+                        match state.delete_snapshot(&file) {
+                            Ok(()) => state
+                                .ui
+                                .notify_success(i18n.t("snapshot.deleted").to_string()),
+                            Err(error) => state.ui.notify_error(error),
                         }
                         state.ui.pending_delete = None;
                     }

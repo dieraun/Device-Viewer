@@ -72,7 +72,7 @@ fn query_sync() -> QueryResult<OpenClInfo> {
         let mut devices = Vec::with_capacity(device_ids.len());
         for device_id in device_ids {
             let device = Device::new(device_id);
-            let raw_type = device.dev_type().unwrap_or(0) as u64;
+            let raw_type = device.dev_type().unwrap_or(0);
             devices.push(OpenClDevice {
                 name: device
                     .name()

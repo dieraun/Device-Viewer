@@ -146,8 +146,10 @@ mod win_audio {
 
         let mut devices = Vec::new();
         for index in 0..256u32 {
-            let mut data = SP_DEVINFO_DATA::default();
-            data.cbSize = std::mem::size_of::<SP_DEVINFO_DATA>() as u32;
+            let mut data = SP_DEVINFO_DATA {
+                cbSize: std::mem::size_of::<SP_DEVINFO_DATA>() as u32,
+                ..Default::default()
+            };
             // SAFETY: set 有效，data 已填好 cbSize 并由 API 写入。
             if unsafe { SetupDiEnumDeviceInfo(set.0, index, &mut data) }.is_err() {
                 break;
@@ -214,8 +216,10 @@ mod win_audio {
 
     fn decode_utf16(bytes: &[u8]) -> Option<String> {
         let words: Vec<u16> = bytes
-            .chunks_exact(2)
-            .map(|pair| u16::from_le_bytes([pair[0], pair[1]]))
+            .as_chunks::<2>()
+            .0
+            .iter()
+            .map(|pair| u16::from_le_bytes(*pair))
             .take_while(|word| *word != 0)
             .collect();
         let text = String::from_utf16_lossy(&words);

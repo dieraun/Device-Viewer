@@ -67,32 +67,40 @@ pub fn show(ui: &mut egui::Ui, state: &mut AppState, i18n: I18n) {
                 ),
             );
         });
-        egui::Grid::new("sensor-temps")
-            .num_columns(4)
-            .striped(true)
-            .show(ui, |ui| {
-                for header in [
-                    i18n.t("common.kind"),
-                    i18n.t("common.label"),
-                    i18n.t("sensors.temperature"),
-                    i18n.t("common.max"),
-                ] {
-                    ui.label(RichText::new(header).weak());
-                }
-                ui.end_row();
-                for sensor in &info.temperatures {
-                    ui.label(&sensor.kind);
-                    ui.label(&sensor.label);
-                    ui.label(format!("{:.1} °C", sensor.celsius));
-                    ui.label(
+        let rows: Vec<widgets::Row> = info
+            .temperatures
+            .iter()
+            .map(|sensor| {
+                widgets::Row::new(vec![
+                    widgets::Cell::Text(sensor.kind.clone()),
+                    widgets::Cell::Text(sensor.label.clone()),
+                    widgets::Cell::Mono(format!("{:.1} °C", sensor.celsius)),
+                    widgets::Cell::Muted(
                         sensor
                             .max_celsius
                             .map(|value| format!("{value:.1} °C"))
                             .unwrap_or_else(|| "-".to_string()),
-                    );
-                    ui.end_row();
-                }
-            });
+                    ),
+                ])
+            })
+            .collect();
+        let table = widgets::data_table(
+            ui,
+            i18n,
+            "sensor-temps",
+            &[
+                i18n.t("common.kind"),
+                i18n.t("common.label"),
+                i18n.t("sensors.temperature"),
+                i18n.t("common.max"),
+            ],
+            &[1.2, 2.4, 1.0, 1.0],
+            &rows,
+            false,
+        );
+        if table.clicked_row.is_some() {
+            state.ui.notify(i18n.t("toast.copied"));
+        }
     });
 
     ui.add_space(8.0);

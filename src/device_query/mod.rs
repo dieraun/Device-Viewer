@@ -46,7 +46,7 @@ pub use vulkan::GpuRuntimeStats;
 pub const DEFAULT_MODULE_TIMEOUT: Duration = Duration::from_secs(8);
 
 /// Every module `collect_all` knows how to run.
-pub const ALL_MODULES: [&'static str; 17] = [
+pub const ALL_MODULES: [&str; 17] = [
     "cpu",
     "memory",
     "pcie",
@@ -98,9 +98,10 @@ impl QueryOptions {
     /// Restricts the pass to `modules`. Unknown names are ignored here; the CLI
     /// validates them against its own list before calling.
     pub fn with_enabled(modules: impl IntoIterator<Item = &'static str>) -> Self {
-        let mut options = Self::default();
-        options.enabled = modules.into_iter().collect();
-        options
+        Self {
+            enabled: modules.into_iter().collect(),
+            ..Self::default()
+        }
     }
 
     pub fn is_enabled(&self, module: &str) -> bool {
@@ -195,7 +196,7 @@ where
     let permit = tokio::select! {
         biased;
         _ = cancel.cancelled() => return Err(QueryError::cancelled(module)),
-        permit = blocking_slots().acquire_owned() => permit.map_err(|_| {
+        permit = blocking_slots().acquire() => permit.map_err(|_| {
             QueryError::error(
                 module,
                 QueryErrorKind::Internal,

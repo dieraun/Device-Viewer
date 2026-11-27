@@ -72,7 +72,7 @@ pub fn section_of(page: Page) -> &'static Section {
 }
 
 fn collapsed_id() -> egui::Id {
-    egui::Id::new("device-viewer-sidebar-collapsed")
+    egui::Id::unique("device-viewer-sidebar-collapsed")
 }
 
 pub fn is_collapsed(ctx: &egui::Context) -> bool {

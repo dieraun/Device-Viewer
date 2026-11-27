@@ -94,7 +94,9 @@ fn query_sync() -> QueryResult<VulkanInfo> {
     let instance_api = loader_version.unwrap_or(vk::API_VERSION_1_0);
 
     let mut warnings = Vec::new();
+    #[allow(unused_mut)]
     let mut enabled_extensions: Vec<*const std::ffi::c_char> = Vec::new();
+    #[allow(unused_mut)]
     let mut create_flags = vk::InstanceCreateFlags::empty();
     #[cfg(target_os = "macos")]
     {
@@ -163,8 +165,11 @@ fn query_sync() -> QueryResult<VulkanInfo> {
     for physical_device in physical_devices {
         // SAFETY: physical_device 来自同一实例的枚举结果，调用期间实例有效；
         // 三个查询都只写返回到 ash 拥有的结构体。
+        // SAFETY: 同一物理设备的属性查询只读，实例在循环期间有效。
         let properties = unsafe { instance.get_physical_device_properties(physical_device) };
+        // SAFETY: 同上，内存属性由驱动写入 ash 拥有的结构体。
         let memory = unsafe { instance.get_physical_device_memory_properties(physical_device) };
+        // SAFETY: 扩展枚举只读取驱动数据，返回列表由 ash 分配。
         let extensions = unsafe { instance.enumerate_device_extension_properties(physical_device) }
             .map(|list| {
                 list.iter()
