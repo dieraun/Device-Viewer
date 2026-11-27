@@ -1,3 +1,6 @@
+> **[已归档] 本文件是 Device Viewer 在 2026-10-30 至 1.3.0 发布前适用的专有许可协议，仅对历史版本（≤ 1.2.0）有效。**
+> **自 1.3.0 起，本项目改用 MIT OR Apache-2.0 双许可，详见 [LICENSE-MIT](LICENSE-MIT) 与 [LICENSE-APACHE](LICENSE-APACHE)。**
+
 # Device Viewer 专有源码可见许可协议
 
 **Device Viewer Proprietary Source-Available License**

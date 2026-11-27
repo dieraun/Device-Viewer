@@ -28,11 +28,13 @@ pub mod usb;
 pub mod vendor_map;
 pub mod vulkan;
 
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, BTreeSet};
 use std::future::Future;
+use std::sync::OnceLock;
 use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 
 use serde::{Deserialize, Serialize};
+use tokio::sync::Semaphore;
 use tokio_util::sync::CancellationToken;
 
 #[allow(unused_imports)]
@@ -43,12 +45,36 @@ pub use vulkan::GpuRuntimeStats;
 /// Default deadline for a single module.
 pub const DEFAULT_MODULE_TIMEOUT: Duration = Duration::from_secs(8);
 
+/// Every module `collect_all` knows how to run.
+pub const ALL_MODULES: [&'static str; 17] = [
+    "cpu",
+    "memory",
+    "pcie",
+    "vulkan",
+    "opengl",
+    "opencl",
+    "npu",
+    "usb",
+    "storage",
+    "motherboard",
+    "display",
+    "directx",
+    "metal",
+    "openvx",
+    "system",
+    "sensors",
+    "bandwidth",
+];
+
 /// Tunable knobs for one collection pass.
 #[derive(Debug, Clone)]
 pub struct QueryOptions {
     pub default_timeout: Duration,
     /// Module name → timeout. Unknown names fall back to `default_timeout`.
     pub overrides: BTreeMap<String, Duration>,
+    /// Modules this pass is allowed to run. A module outside the set is not
+    /// started at all; it reports `unsupported` instead of wasting time.
+    pub enabled: BTreeSet<&'static str>,
 }
 
 impl Default for QueryOptions {
@@ -56,6 +82,7 @@ impl Default for QueryOptions {
         Self {
             default_timeout: DEFAULT_MODULE_TIMEOUT,
             overrides: BTreeMap::new(),
+            enabled: ALL_MODULES.into_iter().collect(),
         }
     }
 }
@@ -66,6 +93,34 @@ impl QueryOptions {
             .get(module)
             .copied()
             .unwrap_or(self.default_timeout)
+    }
+
+    /// Restricts the pass to `modules`. Unknown names are ignored here; the CLI
+    /// validates them against its own list before calling.
+    pub fn with_enabled(modules: impl IntoIterator<Item = &'static str>) -> Self {
+        let mut options = Self::default();
+        options.enabled = modules.into_iter().collect();
+        options
+    }
+
+    pub fn is_enabled(&self, module: &str) -> bool {
+        self.enabled.contains(module)
+    }
+}
+
+/// 门控产生的固定说明，CLI 会据此隐藏“未启用”的伪失败。
+pub const NOT_ENABLED_MESSAGE: &str = "module was not enabled for this collection pass";
+
+/// Skips a disabled module without polling it.
+async fn gate<T>(
+    options: &QueryOptions,
+    module: &'static str,
+    future: impl Future<Output = QueryResult<T>>,
+) -> QueryResult<T> {
+    if options.is_enabled(module) {
+        future.await
+    } else {
+        Err(QueryError::unsupported(module, NOT_ENABLED_MESSAGE))
     }
 }
 
@@ -98,11 +153,30 @@ where
     }
 }
 
+/// Concurrency cap for blocking module queries.
+///
+/// Cancelled platform calls keep running in the background, so the cap keeps a
+/// burst of refreshes from filling the whole blocking pool.
+const MAX_BLOCKING_QUERIES: usize = 4;
+
+fn blocking_slots() -> &'static Semaphore {
+    static SLOTS: OnceLock<Semaphore> = OnceLock::new();
+    SLOTS.get_or_init(|| Semaphore::new(MAX_BLOCKING_QUERIES))
+}
+
 /// Runs blocking platform code on the blocking pool while observing cancellation.
 ///
-/// Blocking operating-system calls cannot be interrupted safely. Dropping the
-/// join handle lets the caller return immediately; the worker finishes in the
-/// background and its result is discarded.
+/// # Cancellation contract
+///
+/// Blocking operating-system calls cannot be interrupted safely, so cancellation
+/// is cooperative here: it is observed before the work starts and while the work
+/// is still queued for a slot. Once the work has started, dropping the join
+/// handle lets the caller return immediately, but the worker runs to completion
+/// and its result is discarded.
+///
+/// Because abandoned work still occupies a thread, the number of concurrent
+/// blocking queries is capped globally; excess callers wait for a slot (and can
+/// still be cancelled while waiting) instead of exhausting the blocking pool.
 pub async fn run_blocking<T, F>(
     module: &'static str,
     cancel: &CancellationToken,
@@ -116,7 +190,24 @@ where
         return Err(QueryError::cancelled(module));
     }
 
-    let handle = tokio::task::spawn_blocking(work);
+    // 槽位跟着实际工作走：调用方提前返回时 permit 仍由后台任务持有，直到
+    // 平台调用真正结束才释放，所以排队数量才有上限。
+    let permit = tokio::select! {
+        biased;
+        _ = cancel.cancelled() => return Err(QueryError::cancelled(module)),
+        permit = blocking_slots().acquire_owned() => permit.map_err(|_| {
+            QueryError::error(
+                module,
+                QueryErrorKind::Internal,
+                "the blocking query pool is closed",
+            )
+        })?,
+    };
+
+    let handle = tokio::task::spawn_blocking(move || {
+        let _slot = permit;
+        work()
+    });
     tokio::select! {
         biased;
         _ = cancel.cancelled() => Err(QueryError::cancelled(module)),
@@ -298,105 +389,98 @@ pub async fn collect_all(options: &QueryOptions, cancel: &CancellationToken) -> 
         "cpu",
         cancel,
         options.timeout_for("cpu"),
-        cpu::query(cancel),
+        gate(options, "cpu", cpu::query(cancel)),
     );
     let memory_job = run_module(
         "memory",
         cancel,
         options.timeout_for("memory"),
-        memory::query(cancel),
+        gate(options, "memory", memory::query(cancel)),
     );
     let pcie_job = run_module(
         "pcie",
         cancel,
         options.timeout_for("pcie"),
-        pcie::query(cancel),
+        gate(options, "pcie", pcie::query(cancel)),
     );
     let vulkan_job = run_module(
         "vulkan",
         cancel,
         options.timeout_for("vulkan"),
-        vulkan::query(cancel),
+        gate(options, "vulkan", vulkan::query(cancel)),
     );
     let opengl_job = run_module(
         "opengl",
         cancel,
         options.timeout_for("opengl"),
-        opengl::query(cancel),
+        gate(options, "opengl", opengl::query(cancel)),
     );
     let opencl_job = run_module(
         "opencl",
         cancel,
         options.timeout_for("opencl"),
-        opencl::query(cancel),
+        gate(options, "opencl", opencl::query(cancel)),
     );
     let npu_job = run_module(
         "npu",
         cancel,
         options.timeout_for("npu"),
-        npu::query(cancel),
+        gate(options, "npu", npu::query(cancel)),
     );
     let usb_job = run_module(
         "usb",
         cancel,
         options.timeout_for("usb"),
-        usb::query(cancel),
+        gate(options, "usb", usb::query(cancel)),
     );
     let storage_job = run_module(
         "storage",
         cancel,
         options.timeout_for("storage"),
-        storage::query(cancel),
+        gate(options, "storage", storage::query(cancel)),
     );
     let motherboard_job = run_module(
         "motherboard",
         cancel,
         options.timeout_for("motherboard"),
-        motherboard::query(cancel),
+        gate(options, "motherboard", motherboard::query(cancel)),
     );
     let display_job = run_module(
         "display",
         cancel,
         options.timeout_for("display"),
-        display::query(cancel),
+        gate(options, "display", display::query(cancel)),
     );
     let directx_job = run_module(
         "directx",
         cancel,
         options.timeout_for("directx"),
-        directx::query(cancel),
+        gate(options, "directx", directx::query(cancel)),
     );
     let metal_job = run_module(
         "metal",
         cancel,
         options.timeout_for("metal"),
-        metal::query(cancel),
+        gate(options, "metal", metal::query(cancel)),
     );
     let openvx_job = run_module(
         "openvx",
         cancel,
         options.timeout_for("openvx"),
-        openvx::query(cancel),
+        gate(options, "openvx", openvx::query(cancel)),
     );
     let system_job = run_module(
         "system",
         cancel,
         options.timeout_for("system"),
-        system::query(cancel),
+        gate(options, "system", system::query(cancel)),
     );
     let sensors_job = run_module(
         "sensors",
         cancel,
         options.timeout_for("sensors"),
-        sensors::query(cancel),
+        gate(options, "sensors", sensors::query(cancel)),
     );
-    let bandwidth_job = run_module(
-        "bandwidth",
-        cancel,
-        options.timeout_for("bandwidth"),
-        bandwidth::query(cancel),
-    );
-
     let (
         cpu_result,
         memory_result,
@@ -414,7 +498,6 @@ pub async fn collect_all(options: &QueryOptions, cancel: &CancellationToken) -> 
         openvx_result,
         system_result,
         sensors_result,
-        bandwidth_result,
     ) = tokio::join!(
         cpu_job,
         memory_job,
@@ -432,8 +515,17 @@ pub async fn collect_all(options: &QueryOptions, cancel: &CancellationToken) -> 
         openvx_job,
         system_job,
         sensors_job,
-        bandwidth_job,
     );
+
+    // 带宽测试独占执行：与其它模块并发会互相抢占内存控制器与 CPU，
+    // 测出来的是争用而不是带宽。
+    let bandwidth_result = run_module(
+        "bandwidth",
+        cancel,
+        options.timeout_for("bandwidth"),
+        gate(options, "bandwidth", bandwidth::query(cancel)),
+    )
+    .await;
 
     let mut snapshot = HardwareSnapshot::default();
     macro_rules! apply {

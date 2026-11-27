@@ -15,17 +15,19 @@ DeviceViewer-<platform>-<arch>-<version>
 | 平台 | 架构 | 目标三元组 | 归档格式 |
 | --- | --- | --- | --- |
 | Windows | x86_64 | `x86_64-pc-windows-msvc` | `.zip` |
-| macOS | x86_64 | `x86_64-apple-darwin` | `.zip` |
-| macOS | aarch64 | `aarch64-apple-darwin` | `.zip` |
+| macOS | x86_64 | `x86_64-apple-darwin` | `.tar.gz` |
+| macOS | aarch64（可选，默认不开启） | `aarch64-apple-darwin` | `.tar.gz` |
 | Linux | x86_64 | `x86_64-unknown-linux-musl` | `.tar.gz` |
 
 每个归档都包含：
 
 - 可执行文件 `DeviceViewer`（Windows 为 `DeviceViewer.exe`）
-- `LICENSE`
+- `LICENSE-MIT`
+- `LICENSE-APACHE`
 - `LEGAL_STATEMENT.md`
 - `PRIVACY.md`
 - `DISCLAIMER.md`
+- `THIRD_PARTY_NOTICES.md`
 - 本说明 `README_PACKAGE.md`
 - 对应的 `.sha256` 校验文件（归档外）
 
@@ -37,7 +39,7 @@ DeviceViewer-<platform>-<arch>-<version>
 - **Microsoft Visual Studio 2022 Build Tools**，安装工作负载 **Desktop development with C++**，至少包含：
   - MSVC v143 x64/x86 build tools
   - Windows 10/11 SDK
-- Rust stable，目标 `x86_64-pc-windows-msvc`。
+- Rust 1.100.0 或更高版本，目标 `x86_64-pc-windows-msvc`。
 - 设置好 `%CARGO_HOME%` 与 `%CARGO_TARGET_DIR%`（可选）。
 
 > 仅运行发布包不需要安装 Rust 或 Visual Studio；只有从源码构建才需要 MSVC C++ Build Tools。
@@ -77,7 +79,7 @@ DeviceViewer.exe --portable
 
 - macOS 11 或更高版本。
 - Xcode Command Line Tools（`xcode-select --install`）。
-- Rust stable；按架构安装目标：
+- Rust 1.100.0 或更高版本；按架构安装目标：
   - Intel：`rustup target add x86_64-apple-darwin`
   - Apple Silicon：`rustup target add aarch64-apple-darwin`
 
@@ -246,7 +248,7 @@ Get-FileHash .\DeviceViewer-windows-x86_64-<version>.zip -Algorithm SHA256
 macOS：
 
 ```bash
-shasum -a 256 DeviceViewer-macos-<arch>-<version>.zip
+shasum -a 256 DeviceViewer-macos-<arch>-<version>.tar.gz
 ```
 
 Linux：
@@ -258,12 +260,8 @@ tar -xzf DeviceViewer-linux-x86_64-<version>.tar.gz
 
 ## 8. 法律与隐私
 
-本项目采用定制化专有许可，**不是** MIT、Apache-2.0、GPL、BSD 或任何 OSI 认可的开源许可证。
+本项目采用 MIT OR Apache-2.0 双许可，是 OSI 认可的开源软件。完整条款见包内 `LICENSE-MIT`、`LICENSE-APACHE`，免责声明见 `DISCLAIMER.md`，隐私说明见 `PRIVACY.md`。
 
-- 个人、非营利组织可免费本地使用、学习研究。
-- 任何盈利组织、商业团队、企业、工作室、付费开发者，未经作者书面授权，禁止使用、复制、修改、衍生、二次开源、二次闭源、二次打包、二次分发、二次发布、商用售卖、集成进商业项目、SaaS、付费工具、课程售卖。
-- 商业授权请联系：**yanruoxinsu2@outlook.com**。
-- 修改源代码必须在项目仓库提交 Issue 报备；禁止修改后二次公开、二次发布、二次开源、二次引流售卖。
-- 完整条款见包内 `LICENSE`、`LEGAL_STATEMENT.md`、`PRIVACY.md`、`DISCLAIMER.md`。
+著作权归属、商标与第三方组件说明见包内 `LEGAL_STATEMENT.md`。
 
 程序纯本地运行，不上传硬件信息、快照、日志或使用统计。分享快照前请自行检查其中可能包含的主机名、序列号、MAC 地址、IP 地址等设备标识。

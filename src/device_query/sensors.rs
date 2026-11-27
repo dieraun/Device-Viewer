@@ -41,6 +41,11 @@ pub struct SensorsInfo {
     pub fans: Vec<FanSensor>,
     pub voltages: Vec<VoltageSensor>,
     pub warnings: Vec<String>,
+    /// Informational hints. Kept apart from `warnings` so that a platform
+    /// limitation (for example "no fan channel on Windows") never keeps the
+    /// warning badge lit and buries actual problems.
+    #[serde(default)]
+    pub notes: Vec<String>,
 }
 
 #[cfg(not(feature = "sensors"))]
@@ -86,10 +91,7 @@ pub async fn query(cancel: &CancellationToken) -> QueryResult<SensorsInfo> {
         linux::collect(&mut info);
 
         #[cfg(target_os = "windows")]
-        info.warnings.push(
-            "fan and voltage channels require vendor tooling on Windows; temperatures come from ACPI where available"
-                .to_string(),
-        );
+        windows_note(&mut info);
 
         deduplicate(&mut info);
         Ok(info)
@@ -125,37 +127,19 @@ fn classify(label: &str) -> &'static str {
     }
 }
 
+/// Windows exposes fan RPM and voltage rails only through vendor tooling, so a
+/// missing channel is expected rather than a problem worth a warning badge.
 #[cfg(all(feature = "sensors", target_os = "windows"))]
-fn query_nvidia_temperatures(info: &mut SensorsInfo) {
-    let output = std::process::Command::new("nvidia-smi")
-        .args([
-            "--query-gpu=name,temperature.gpu",
-            "--format=csv,noheader,nounits",
-        ])
-        .output();
-    let Ok(output) = output else { return };
-    if !output.status.success() {
-        return;
-    }
-    let text = String::from_utf8_lossy(&output.stdout);
-    for line in text.lines() {
-        let Some((name, temperature)) = line.rsplit_once(',') else {
-            continue;
-        };
-        let Ok(value) = temperature.trim().parse::<f32>() else {
-            continue;
-        };
-        info.temperatures.push(TemperatureSensor {
-            kind: "gpu".to_string(),
-            label: name.trim().to_string(),
-            celsius: value,
-            max_celsius: None,
-            critical_celsius: None,
-        });
+fn windows_note(info: &mut SensorsInfo) {
+    if info.fans.is_empty() && info.voltages.is_empty() {
+        info.notes.push(
+            "fan and voltage channels are not exposed by Windows ACPI; vendor tooling (for example nvidia-smi) is required for GPU fans"
+                .to_string(),
+        );
     }
 }
 
-#[cfg(all(feature = "sensors", target_os = "linux"))]
+#[cfg(all(feature = "sensors", any(target_os = "windows", target_os = "linux")))]
 fn query_nvidia_temperatures(info: &mut SensorsInfo) {
     let output = std::process::Command::new("nvidia-smi")
         .args([
@@ -293,8 +277,32 @@ mod linux {
     }
 }
 
+/// `nvidia-smi` and `sysinfo` label the same GPU differently, so the plain
+/// `(kind, label)` comparison below cannot merge them. Two readings of the same
+/// card agree within a degree, so use that as the identity and keep the more
+/// descriptive label.
+#[cfg(feature = "sensors")]
+fn merge_gpu_readings(info: &mut SensorsInfo) {
+    let mut merged: Vec<TemperatureSensor> = Vec::with_capacity(info.temperatures.len());
+    for sensor in info.temperatures.drain(..) {
+        if sensor.kind == "gpu"
+            && let Some(existing) = merged
+                .iter_mut()
+                .find(|other| other.kind == "gpu" && (other.celsius - sensor.celsius).abs() <= 1.0)
+        {
+            if existing.label.len() < sensor.label.len() {
+                existing.label = sensor.label;
+            }
+            continue;
+        }
+        merged.push(sensor);
+    }
+    info.temperatures = merged;
+}
+
 #[cfg(feature = "sensors")]
 fn deduplicate(info: &mut SensorsInfo) {
+    merge_gpu_readings(info);
     info.temperatures
         .sort_by(|left, right| (&left.kind, &left.label).cmp(&(&right.kind, &right.label)));
     info.temperatures

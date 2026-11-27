@@ -6,10 +6,10 @@ use crate::device_query::format_bytes;
 use crate::export::markdown_table;
 use crate::i18n::I18n;
 use crate::state::AppState;
+use crate::ui::theme;
 use crate::ui::widgets;
 
 pub fn show(ui: &mut egui::Ui, state: &mut AppState, i18n: I18n) {
-    widgets::page_header(ui, i18n, "nav.directx", "page.directx.sub");
     let Some(info) = state.snapshot.directx.clone() else {
         widgets::empty(ui, i18n.t("overview.no_data"));
         return;
@@ -58,7 +58,7 @@ pub fn show(ui: &mut egui::Ui, state: &mut AppState, i18n: I18n) {
     for (index, adapter) in info.adapters.iter().enumerate() {
         widgets::card(ui, |ui| {
             ui.horizontal(|ui| {
-                ui.label(RichText::new(&adapter.name).size(16.0).strong());
+                ui.label(RichText::new(&adapter.name).size(theme::FONT_H2).strong());
                 if adapter.software {
                     widgets::badge(ui, "Software", widgets::BadgeKind::Warning);
                 }

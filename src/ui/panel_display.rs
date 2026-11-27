@@ -6,10 +6,10 @@ use crate::device_query::format_bytes;
 use crate::export::markdown_table;
 use crate::i18n::I18n;
 use crate::state::AppState;
+use crate::ui::theme;
 use crate::ui::widgets;
 
 pub fn show(ui: &mut egui::Ui, state: &mut AppState, i18n: I18n) {
-    widgets::page_header(ui, i18n, "nav.display", "page.display.sub");
     let Some(info) = state.snapshot.display.clone() else {
         widgets::empty(ui, i18n.t("display.no_monitors"));
         return;
@@ -35,11 +35,18 @@ pub fn show(ui: &mut egui::Ui, state: &mut AppState, i18n: I18n) {
                     );
                     if monitor.primary {
                         widgets::badge(ui, i18n.t("display.primary"), widgets::BadgeKind::Ok);
+                    } else if !monitor.primary_known {
+                        // 平台没有主屏信息时，不能靠“没有徽章”暗示它是副屏。
+                        widgets::badge(
+                            ui,
+                            i18n.t("display.primary_unknown"),
+                            widgets::BadgeKind::Info,
+                        );
                     }
                 });
                 ui.label(
                     RichText::new(format!("{} × {}", monitor.width, monitor.height))
-                        .size(20.0)
+                        .size(theme::FONT_H1)
                         .strong(),
                 );
                 ui.label(
@@ -49,15 +56,20 @@ pub fn show(ui: &mut egui::Ui, state: &mut AppState, i18n: I18n) {
                     })
                     .weak(),
                 );
+                // 平台不提供桌面布局时给“未知”，不要用 0, 0 冒充真实坐标。
                 ui.label(
-                    RichText::new(format!(
-                        "{}: {}, {}",
-                        i18n.t("display.position"),
-                        monitor.position_x,
-                        monitor.position_y
-                    ))
+                    RichText::new(if monitor.position_known {
+                        format!(
+                            "{}: {}, {}",
+                            i18n.t("display.position"),
+                            monitor.position_x,
+                            monitor.position_y
+                        )
+                    } else {
+                        format!("{}: —", i18n.t("display.position"))
+                    })
                     .weak()
-                    .size(11.0),
+                    .size(theme::FONT_CAPTION),
                 );
             });
         }

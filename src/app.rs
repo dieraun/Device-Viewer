@@ -1,12 +1,14 @@
 //! eframe application shell: startup collection, navigation, toolbar and export.
 
 use std::cmp::Ordering;
+use std::sync::Arc;
 use std::sync::mpsc::{Receiver, TryRecvError};
 use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 
 use eframe::egui;
 use serde::Deserialize;
 use tokio::runtime::Runtime;
+use tokio::sync::Semaphore;
 use tokio_util::sync::CancellationToken;
 
 use crate::device_query::opengl;
@@ -17,6 +19,7 @@ use crate::i18n::{self, I18n};
 use crate::log;
 use crate::state::{AppState, ThemeMode, UpdateReport, UpdateState};
 use crate::ui;
+use crate::ui::theme;
 
 const UPDATE_ENDPOINT: &str = "https://api.github.com/repos/dieraun/Device-Viewer/releases";
 const UPDATE_USER_AGENT: &str = "device-viewer";
@@ -41,10 +44,16 @@ enum QueryEvent {
 }
 
 pub fn run(portable: bool) -> eframe::Result {
+    // 上次退出时的位置与尺寸；缺失或不合理时退回默认窗口。
+    let viewport = match crate::state::saved_window_rect(portable) {
+        Some([x, y, width, height]) => egui::ViewportBuilder::default()
+            .with_inner_size([width, height])
+            .with_position([x, y]),
+        None => egui::ViewportBuilder::default().with_inner_size([1280.0, 820.0]),
+    }
+    .with_min_inner_size([980.0, 640.0]);
     let options = eframe::NativeOptions {
-        viewport: egui::ViewportBuilder::default()
-            .with_inner_size([1280.0, 820.0])
-            .with_min_inner_size([980.0, 640.0]),
+        viewport,
         ..Default::default()
     };
     eframe::run_native(
@@ -70,11 +79,30 @@ pub struct DeviceViewerApp {
     last_gpu_poll: Instant,
     last_gpu_sample: Instant,
     export_open: bool,
+    more_open: bool,
+    /// 命令面板（Ctrl+K）是否打开。
+    palette_open: bool,
+    palette_query: String,
+    palette_selection: usize,
     export_format: ExportFormat,
     export_preview: String,
     startup_error: Option<String>,
     applied_theme: Option<egui::ThemePreference>,
     last_window_rect: Option<[f32; 4]>,
+    /// OpenGL 身份只在获得渲染上下文后探测一次，失败也不逐帧重试。
+    opengl_probed: bool,
+    /// 采集是互斥的：取消旧一轮后，旧任务可能仍阻塞在平台调用里，
+    /// 用信号量保证同一时刻只有一个采集批次真正运行。
+    query_semaphore: Arc<Semaphore>,
+}
+
+/// 命令面板可执行的动作：页面跳转或全局操作。
+#[derive(Clone, Copy)]
+enum PaletteAction {
+    Page(crate::state::Page),
+    Refresh,
+    Export,
+    ToggleTheme,
 }
 
 impl DeviceViewerApp {
@@ -109,16 +137,28 @@ impl DeviceViewerApp {
             last_gpu_poll: Instant::now(),
             last_gpu_sample: Instant::now(),
             export_open: false,
+            more_open: false,
+            palette_open: false,
+            palette_query: String::new(),
+            palette_selection: 0,
             export_format: ExportFormat::Markdown,
             export_preview: String::new(),
             startup_error: None,
             applied_theme: None,
             last_window_rect: None,
+            opengl_probed: false,
+            query_semaphore: Arc::new(Semaphore::new(1)),
         };
         crate::ui::widgets::install_style(&creation.egui_ctx);
         app.apply_theme(&creation.egui_ctx);
         app.start_query();
-        if app.state.settings.auto_check_updates {
+        // 启动时自动检查更新受 24 小时节流：GitHub 未认证 API 每小时只有
+        // 60 次额度，频繁重启必须复用上一次的检查时间。
+        let now = now_ms();
+        if app.state.settings.auto_check_updates
+            && now.saturating_sub(app.state.settings.last_update_check_ms)
+                >= UPDATE_CHECK_INTERVAL_MS
+        {
             app.start_update_check();
         }
         app
@@ -155,8 +195,18 @@ impl DeviceViewerApp {
         };
         let token = self.cancel.clone();
         let sender = self.sender.clone();
+        let semaphore = self.query_semaphore.clone();
         runtime.spawn(async move {
+            // 已取消的旧批次可能还占着许可；等到它退出或本轮被取消。
+            let Ok(_permit) = semaphore.acquire_owned().await else {
+                return;
+            };
+            if token.is_cancelled() {
+                return;
+            }
             let snapshot = collect_all(&QueryOptions::default(), &token).await;
+            // 结果只带自己的代号返回；poll_events 会丢弃非当前代号的快照，
+            // 因此被取消的旧任务不可能把过期数据写回界面。
             let _ = sender.send(QueryEvent::Snapshot {
                 generation,
                 snapshot,
@@ -178,6 +228,10 @@ impl DeviceViewerApp {
             log::warn("update check skipped: async runtime is unavailable");
             return;
         };
+        // 请求一旦发出就会消耗 API 额度，无论成功还是失败都要记下时间，
+        // 这样重启后不会再立刻发起第二次请求。
+        self.state.settings.last_update_check_ms = now_ms();
+        self.state.mark_dirty();
         let sender = self.sender.clone();
         runtime.spawn_blocking(move || {
             let result = check_for_update(&current, include_prerelease);
@@ -227,8 +281,15 @@ impl DeviceViewerApp {
                     }
                     self.busy = false;
                     self.state.snapshot = snapshot;
+                    // 新一轮采集结果需要重新从渲染上下文取 OpenGL 身份。
+                    self.opengl_probed = false;
                     self.state.record_gpu_sample();
                     self.last_gpu_sample = Instant::now();
+                    // 导出窗口开着时，预览必须跟着新快照走；否则用户点刷新
+                    // 看到的仍是上一轮采集结果。
+                    if self.export_open {
+                        self.refresh_export();
+                    }
                     log::info(format!(
                         "collection finished with {} warning(s) and {} error(s)",
                         self.state.snapshot.warning_count(),
@@ -287,6 +348,9 @@ impl DeviceViewerApp {
     /// this is the only place where querying `GL_VENDOR`/`GL_RENDERER` is
     /// valid. It runs once per collection result and is a no-op afterwards.
     fn refresh_opengl(&mut self, frame: &eframe::Frame) {
+        if self.opengl_probed {
+            return;
+        }
         if self
             .state
             .snapshot
@@ -294,12 +358,15 @@ impl DeviceViewerApp {
             .as_ref()
             .is_some_and(|info| info.available)
         {
+            self.opengl_probed = true;
             return;
         }
         let Some(gl) = frame.gl() else {
+            // 渲染上下文尚未就绪：下一帧再试，不缓存失败状态。
             return;
         };
         self.state.snapshot.opengl = Some(opengl::query_from_context(gl));
+        self.opengl_probed = true;
         log::info("OpenGL identity captured from the rendering context");
     }
 
@@ -327,126 +394,253 @@ impl DeviceViewerApp {
             .duration_since(UNIX_EPOCH)
             .map(|duration| duration.as_millis())
             .unwrap_or_default();
-        let path = self.state.snapshots_dir.join(format!(
+        let path = self.state.exports_dir.join(format!(
             "device-viewer-export-{timestamp}.{}",
             self.export_format.extension()
         ));
         if let Some(parent) = path.parent() {
             if let Err(error) = std::fs::create_dir_all(parent) {
                 log::error(format!("cannot create export directory: {error}"));
-                self.state.ui.toast = Some(format!("export failed: {error}"));
+                self.state.ui.notify(format!("export failed: {error}"));
                 return;
             }
         }
         match std::fs::write(&path, &self.export_preview) {
             Ok(()) => {
-                self.state.ui.toast = Some(format!("Saved {}", path.display()));
+                self.state.ui.notify(format!("Saved {}", path.display()));
                 log::info(format!("exported report to {}", path.display()));
             }
             Err(error) => {
                 log::error(format!("cannot write export {}: {error}", path.display()));
-                self.state.ui.toast = Some(format!("export failed: {error}"));
+                self.state.ui.notify(format!("export failed: {error}"));
             }
         }
     }
 
-    fn toolbar(&mut self, ui: &mut egui::Ui) {
-        ui.horizontal(|ui| {
-            ui.label(egui::RichText::new("Device Viewer").strong().size(15.0));
-            ui.separator();
-            if ui
-                .button(format!("⟳ {}", self.i18n.t("common.refresh")))
-                .clicked()
-            {
-                self.state.ui.request_refresh = true;
-            }
-            if ui
-                .button(format!("⇩ {}", self.i18n.t("nav.export")))
-                .clicked()
-            {
-                self.open_export();
-            }
-            let language_label = self.i18n.t(self.state.settings.language.label_key());
-            if ui
-                .button(language_label)
-                .on_hover_text(self.i18n.t("settings.language_hint"))
-                .clicked()
-            {
-                self.state.settings.language = self.state.settings.language.cycle();
-                self.state.mark_dirty();
-            }
-            let theme = self.state.settings.theme;
-            if ui
-                .button(theme.icon())
-                .on_hover_text(self.i18n.t(theme.label_key()))
-                .clicked()
-            {
-                self.state.settings.theme = theme.cycle();
-                self.state.settings.dark = None;
-                self.state.mark_dirty();
-            }
-            if self.busy {
-                ui.spinner();
-                ui.label(
-                    egui::RichText::new(format!(
-                        "{} {:.1}s",
-                        self.i18n.t("app.collecting"),
-                        self.started.elapsed().as_secs_f32()
-                    ))
-                    .weak(),
+    /// 命令面板：输入即搜页面与全局动作，支持上下键选择。
+    fn palette_window(&mut self, ctx: &egui::Context) {
+        if !self.palette_open {
+            return;
+        }
+        let t = theme::Theme::of(ctx.style().visuals.dark_mode);
+        let mut open = true;
+        let mut chosen: Option<PaletteAction> = None;
+        egui::Window::new(self.i18n.t("shell.palette"))
+            .id(egui::Id::new("command-palette"))
+            .open(&mut open)
+            .anchor(egui::Align2::CENTER_TOP, [0.0, 96.0])
+            .fixed_width(520.0)
+            .resizable(false)
+            .frame(t.overlay_frame())
+            .show(ctx, |ui| {
+                ui.add(
+                    egui::TextEdit::singleline(&mut self.palette_query)
+                        .hint_text(self.i18n.t("shell.palette_hint"))
+                        .desired_width(f32::INFINITY),
                 );
+                let query = self.palette_query.to_lowercase();
+                let mut items: Vec<(PaletteAction, String)> = Vec::new();
+                for section in ui::sidebar::SECTIONS {
+                    for page in section.pages {
+                        let title = self.i18n.t(page.title_key()).to_string();
+                        if query.is_empty() || title.to_lowercase().contains(&query) {
+                            items.push((PaletteAction::Page(*page), title));
+                        }
+                    }
+                }
+                // 页面之外再放三个全局动作，这样 23 个入口可以真正藏进 Ctrl+K。
+                for (action, label) in [
+                    (PaletteAction::Refresh, self.i18n.t("common.refresh")),
+                    (PaletteAction::Export, self.i18n.t("nav.export")),
+                    (PaletteAction::ToggleTheme, self.i18n.t("settings.theme")),
+                ] {
+                    if query.is_empty() || label.to_lowercase().contains(&query) {
+                        items.push((action, label.to_string()));
+                    }
+                }
+                if items.is_empty() {
+                    ui.add_space(theme::SPACE_3);
+                    ui.label(
+                        egui::RichText::new(self.i18n.t("shell.palette_empty"))
+                            .size(theme::FONT_BODY)
+                            .color(t.text_tertiary),
+                    );
+                    return;
+                }
+                let last = items.len() - 1;
+                if ui.input(|i| i.key_pressed(egui::Key::ArrowDown)) {
+                    self.palette_selection = (self.palette_selection + 1).min(last);
+                }
+                if ui.input(|i| i.key_pressed(egui::Key::ArrowUp)) {
+                    self.palette_selection = self.palette_selection.saturating_sub(1);
+                }
+                self.palette_selection = self.palette_selection.min(last);
+                let enter = ui.input(|i| i.key_pressed(egui::Key::Enter));
+                if enter {
+                    chosen = Some(items[self.palette_selection].0);
+                }
+                ui.add_space(theme::SPACE_2);
+                egui::ScrollArea::vertical()
+                    .id_salt("palette-results")
+                    .max_height(320.0)
+                    .show(ui, |ui| {
+                        for (index, (action, title)) in items.iter().enumerate() {
+                            let selected = index == self.palette_selection;
+                            if ui.selectable_label(selected, title).clicked() {
+                                chosen = Some(*action);
+                            }
+                        }
+                    });
+            });
+        if let Some(action) = chosen {
+            self.palette_open = false;
+            match action {
+                PaletteAction::Page(page) => {
+                    self.state.settings.page = page;
+                    self.state.mark_dirty();
+                }
+                PaletteAction::Refresh => self.start_query(),
+                PaletteAction::Export => self.open_export(),
+                PaletteAction::ToggleTheme => {
+                    self.state.settings.theme = match self.state.settings.theme {
+                        ThemeMode::System => ThemeMode::Dark,
+                        ThemeMode::Dark => ThemeMode::Light,
+                        ThemeMode::Light => ThemeMode::System,
+                    };
+                    self.state.mark_dirty();
+                }
+            }
+        }
+        if !open {
+            self.palette_open = false;
+        }
+    }
+
+    /// 吸顶标题栏：只放页面标题、刷新、导出和更多菜单。语言与主题在设置页，
+    /// 版本号只在侧栏出现一次。
+    fn header(&mut self, ui: &mut egui::Ui) {
+        let t = ui::theme::theme(ui);
+        let page = self.state.settings.page;
+        ui.horizontal(|ui| {
+            ui.add_space(theme::SPACE_1);
+            ui.label(
+                egui::RichText::new(self.i18n.t(page.title_key()))
+                    .size(theme::FONT_H1)
+                    .strong()
+                    .color(t.text_primary),
+            )
+            .on_hover_text(self.i18n.t(page.subtitle_key()));
+            if self.busy {
+                let (rect, response) =
+                    ui.allocate_exact_size(egui::Vec2::splat(10.0), egui::Sense::hover());
+                ui.painter().circle_filled(rect.center(), 3.5, t.accent);
+                response.on_hover_text(format!(
+                    "{} {:.1}s",
+                    self.i18n.t("app.collecting"),
+                    self.started.elapsed().as_secs_f32()
+                ));
             }
             ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-                let warnings = self.state.total_warnings();
-                if warnings > 0 {
-                    ui::widgets::badge(
-                        ui,
-                        format!("! {warnings}"),
-                        ui::widgets::BadgeKind::Warning,
-                    );
+                if ui
+                    .add(
+                        egui::Button::new(
+                            egui::RichText::new(self.i18n.t("shell.more"))
+                                .size(theme::FONT_BODY)
+                                .color(t.text_secondary),
+                        )
+                        .frame(false),
+                    )
+                    .on_hover_text(self.i18n.t("shell.more_hint"))
+                    .clicked()
+                {
+                    self.more_open = !self.more_open;
                 }
-                ui.label(
-                    egui::RichText::new(format!("v{}", env!("CARGO_PKG_VERSION")))
-                        .weak()
-                        .size(11.0),
-                );
+                if ui::widgets::icon_text_button(ui, theme::Icon::Export, self.i18n.t("nav.export"))
+                    .clicked()
+                {
+                    self.open_export();
+                }
+                if ui::widgets::icon_text_button(
+                    ui,
+                    theme::Icon::Refresh,
+                    self.i18n.t("common.refresh"),
+                )
+                .clicked()
+                {
+                    self.state.ui.request_refresh = true;
+                }
             });
         });
     }
 
+    /// 启动采集期间的骨架屏：三列灰块占位，配合真实进度条。
     fn loading_page(&mut self, ui: &mut egui::Ui) {
-        egui::CentralPanel::default().show(ui, |ui| {
-            ui.vertical_centered(|ui| {
-                ui.add_space((ui.available_height() * 0.18).max(40.0));
-                ui.label(egui::RichText::new("◈").size(54.0));
-                ui.label(egui::RichText::new("Device Viewer").size(30.0).strong());
-                ui.label(
-                    egui::RichText::new(self.i18n.t("loading.subtitle"))
-                        .weak()
-                        .size(13.0),
-                );
-                ui.add_space(28.0);
-                let progress = (self.started.elapsed().as_secs_f32()
-                    / DEFAULT_MODULE_TIMEOUT.as_secs_f32())
-                .mul_add(0.95, 0.0)
-                .clamp(0.0, 0.95);
-                ui.add_sized(
-                    [430.0, 18.0],
-                    egui::ProgressBar::new(progress)
-                        .text(format!("{}%", (progress * 100.0) as u32)),
-                );
-                ui.add_space(10.0);
-                ui.label(
-                    egui::RichText::new(self.i18n.t("loading.hint"))
-                        .weak()
-                        .size(11.0),
-                );
-                if let Some(error) = &self.startup_error {
-                    ui.add_space(12.0);
-                    ui.colored_label(egui::Color32::from_rgb(230, 90, 90), error);
-                }
+        let t = ui::theme::theme(ui);
+        egui::CentralPanel::default()
+            .frame(
+                egui::Frame::new()
+                    .fill(t.canvas)
+                    .inner_margin(egui::Margin::same(theme::SPACE_8 as i8)),
+            )
+            .show(ui, |ui| {
+                ui.vertical_centered(|ui| {
+                    ui.add_space((ui.available_height() * 0.12).max(24.0));
+                    ui.label(
+                        egui::RichText::new("Device Viewer")
+                            .size(theme::FONT_DISPLAY)
+                            .strong()
+                            .color(t.text_primary),
+                    );
+                    ui.add_space(theme::SPACE_1);
+                    ui.label(
+                        egui::RichText::new(self.i18n.t("loading.reading"))
+                            .size(theme::FONT_CAPTION)
+                            .color(t.text_secondary),
+                    );
+                    ui.add_space(theme::SPACE_6);
+                    ui.horizontal(|ui| {
+                        ui.add_space((ui.available_width() * 0.12).max(0.0));
+                        for _ in 0..3 {
+                            let (rect, _) = ui.allocate_exact_size(
+                                egui::Vec2::new(220.0, 96.0),
+                                egui::Sense::hover(),
+                            );
+                            ui.painter().rect_filled(
+                                rect,
+                                egui::CornerRadius::same(theme::RADIUS_CARD),
+                                t.raised,
+                            );
+                            ui.add_space(theme::SPACE_4);
+                        }
+                    });
+                    ui.add_space(theme::SPACE_6);
+                    let progress = (self.started.elapsed().as_secs_f32()
+                        / DEFAULT_MODULE_TIMEOUT.as_secs_f32())
+                    .mul_add(0.95, 0.0)
+                    .clamp(0.0, 0.95);
+                    ui.add(
+                        egui::ProgressBar::new(progress)
+                            .desired_width(430.0)
+                            .desired_height(8.0)
+                            .corner_radius(egui::CornerRadius::same(theme::RADIUS_CONTROL))
+                            .fill(t.accent),
+                    );
+                    ui.add_space(theme::SPACE_3);
+                    ui.label(
+                        egui::RichText::new(self.i18n.t("loading.hint"))
+                            .size(theme::FONT_CAPTION)
+                            .color(t.text_tertiary),
+                    );
+                    if let Some(error) = &self.startup_error {
+                        ui.add_space(theme::SPACE_3);
+                        ui.label(
+                            egui::RichText::new(error)
+                                .size(theme::FONT_BODY)
+                                .color(t.err),
+                        );
+                    }
+                });
             });
-        });
     }
 
     fn export_window(&mut self, ctx: &egui::Context) {
@@ -501,51 +695,95 @@ impl DeviceViewerApp {
         if self.state.permission.elevated || !self.state.ui.permission_notice_open {
             return;
         }
-        egui::Panel::top("permission-banner").show(ui, |ui| {
-            ui.horizontal_wrapped(|ui| {
-                ui.label(
-                    egui::RichText::new(format!("! {}", self.i18n.t("permission.standard_hint")))
-                        .color(egui::Color32::from_rgb(230, 185, 80)),
-                );
-                if !self.state.permission.items.is_empty() {
+        let t = ui::theme::theme(ui);
+        egui::Panel::top("permission-banner")
+            .frame(
+                egui::Frame::new()
+                    .fill(t.raised)
+                    .inner_margin(egui::Margin::symmetric(
+                        theme::SPACE_6 as i8,
+                        theme::SPACE_2 as i8,
+                    ))
+                    .stroke(egui::Stroke::new(theme::BORDER_WIDTH, t.border_subtle)),
+            )
+            .show(ui, |ui| {
+                ui.horizontal_wrapped(|ui| {
+                    ui::theme::icon_widget(ui, theme::Icon::Warning, 16.0);
                     ui.label(
-                        egui::RichText::new(self.state.permission.items.join(" · "))
-                            .weak()
-                            .size(11.0),
+                        egui::RichText::new(self.i18n.t("permission.standard_hint"))
+                            .size(theme::FONT_CAPTION)
+                            .color(t.warn),
                     );
+                    if !self.state.permission.items.is_empty() {
+                        ui.label(
+                            egui::RichText::new(self.state.permission.items.join(" · "))
+                                .size(theme::FONT_CAPTION)
+                                .color(t.text_secondary),
+                        );
+                    }
+                    if ui::widgets::icon_button(ui, theme::Icon::Close, self.i18n.t("app.close"))
+                        .clicked()
+                    {
+                        self.state.ui.permission_notice_open = false;
+                    }
+                });
+            });
+    }
+
+    /// The overflow menu behind the More button: a small floating surface.
+    fn more_window(&mut self, ctx: &egui::Context) {
+        if !self.more_open {
+            return;
+        }
+        let t = ui::theme::Theme::of(ctx.style().visuals.dark_mode);
+        let mut window_open = true;
+        let mut close_now = false;
+        egui::Window::new(self.i18n.t("shell.more"))
+            .open(&mut window_open)
+            .resizable(false)
+            .collapsible(false)
+            .title_bar(false)
+            .anchor(egui::Align2::RIGHT_TOP, [-16.0, 64.0])
+            .frame(t.overlay_frame())
+            .show(ctx, |ui| {
+                ui.set_min_width(180.0);
+                if ui.button(self.i18n.t("nav.export")).clicked() {
+                    self.open_export();
+                    close_now = true;
                 }
-                if ui.button("✕").clicked() {
-                    self.state.ui.permission_notice_open = false;
+                if ui.button(self.i18n.t("nav.snapshots")).clicked() {
+                    self.state.settings.page = crate::state::Page::Snapshots;
+                    self.state.mark_dirty();
+                    close_now = true;
+                }
+                if ui.button(self.i18n.t("nav.settings")).clicked() {
+                    self.state.settings.page = crate::state::Page::Settings;
+                    self.state.mark_dirty();
+                    close_now = true;
+                }
+                if ui.button(self.i18n.t("nav.updates")).clicked() {
+                    self.state.settings.page = crate::state::Page::Updates;
+                    self.state.mark_dirty();
+                    close_now = true;
                 }
             });
-        });
+        self.more_open = window_open && !close_now;
     }
 
     fn root_ui(&mut self, ui: &mut egui::Ui) {
-        let page_before = self.state.settings.page;
-        let dark = ui.visuals().dark_mode;
-        let sidebar_bg = if dark {
-            egui::Color32::from_rgb(13, 19, 26)
-        } else {
-            egui::Color32::from_rgb(238, 243, 249)
-        };
-        let toolbar_bg = if dark {
-            egui::Color32::from_rgb(16, 22, 30)
-        } else {
-            egui::Color32::WHITE
-        };
-        let border = if dark {
-            egui::Color32::from_rgb(31, 42, 55)
-        } else {
-            egui::Color32::from_rgb(219, 226, 235)
-        };
+        let t = ui::theme::theme(ui);
+        let sidebar_width = ui::sidebar::width(ui.ctx());
         egui::Panel::left("device-viewer-sidebar")
             .resizable(false)
-            .exact_size(224.0)
+            .exact_size(sidebar_width)
             .frame(
                 egui::Frame::new()
-                    .fill(sidebar_bg)
-                    .inner_margin(egui::Margin::symmetric(10, 8)),
+                    .fill(t.canvas)
+                    .inner_margin(egui::Margin::symmetric(
+                        theme::SPACE_2 as i8,
+                        theme::SPACE_2 as i8,
+                    ))
+                    .stroke(egui::Stroke::new(theme::BORDER_WIDTH, t.border_subtle)),
             )
             .show(ui, |ui| {
                 ui::sidebar::show(ui, &mut self.state, self.i18n);
@@ -553,26 +791,33 @@ impl DeviceViewerApp {
         egui::Panel::top("device-viewer-toolbar")
             .frame(
                 egui::Frame::new()
-                    .fill(toolbar_bg)
-                    .inner_margin(egui::Margin::symmetric(12, 6))
-                    .stroke(egui::Stroke::new(1.0, border)),
+                    .fill(t.canvas)
+                    .inner_margin(egui::Margin::symmetric(
+                        theme::SPACE_6 as i8,
+                        theme::SPACE_3 as i8,
+                    ))
+                    .stroke(egui::Stroke::new(theme::BORDER_WIDTH, t.border_subtle)),
             )
             .show(ui, |ui| {
-                self.toolbar(ui);
+                self.header(ui);
             });
         self.permission_banner(ui);
-        egui::CentralPanel::default().show(ui, |ui| {
-            egui::ScrollArea::vertical()
-                .auto_shrink([false, false])
-                .show(ui, |ui| {
-                    ui::show_page(ui, &mut self.state, self.i18n);
-                });
-        });
+        egui::CentralPanel::default()
+            .frame(
+                egui::Frame::new()
+                    .fill(t.canvas)
+                    .inner_margin(egui::Margin::symmetric(
+                        theme::SPACE_6 as i8,
+                        theme::SPACE_3 as i8,
+                    )),
+            )
+            .show(ui, |ui| {
+                // 页面级滚动由 ui::show_page 统一提供，根层不再套第二层。
+                ui::show_page(ui, &mut self.state, self.i18n);
+            });
 
-        if page_before != self.state.settings.page && self.busy {
-            log::info("page changed while collecting; restarting the query pass");
-            self.start_query();
-        }
+        // 切换页面只影响显示，绝不再触发整轮采集：17 个模块的开销与
+        // 用户想看的页面无关。
     }
 
     fn save_window_rect(&mut self, ctx: &egui::Context) {
@@ -628,19 +873,86 @@ impl eframe::App for DeviceViewerApp {
             self.root_ui(ui);
         }
 
+        let refresh_shortcut =
+            ctx.input_mut(|i| i.consume_key(egui::Modifiers::CTRL, egui::Key::R));
+        let export_shortcut = ctx.input_mut(|i| i.consume_key(egui::Modifiers::CTRL, egui::Key::E));
+        let palette_shortcut =
+            ctx.input_mut(|i| i.consume_key(egui::Modifiers::CTRL, egui::Key::K));
+        let escape = ctx.input(|i| i.key_pressed(egui::Key::Escape));
+        if refresh_shortcut {
+            self.start_query();
+        }
+        if export_shortcut {
+            self.open_export();
+        }
+        if palette_shortcut {
+            self.palette_open = true;
+            self.palette_selection = 0;
+        }
+        if escape {
+            self.more_open = false;
+            self.export_open = false;
+            self.palette_open = false;
+            self.state.ui.snapshot_menu = None;
+        }
+
+        self.palette_window(&ctx);
+        self.more_window(&ctx);
         self.export_window(&ctx);
-        if let Some(toast) = &self.state.ui.toast {
-            egui::Area::new(egui::Id::unique("toast"))
-                .anchor(egui::Align2::CENTER_BOTTOM, [0.0, -18.0])
+        self.state.ui.prune_toasts();
+        if !self.state.ui.toasts.is_empty() {
+            let t = ui::theme::Theme::of(ctx.style().visuals.dark_mode);
+            let mut jump = None;
+            egui::Area::new(egui::Id::new("toasts"))
+                .anchor(
+                    egui::Align2::RIGHT_BOTTOM,
+                    [-theme::SPACE_6, -theme::SPACE_6],
+                )
                 .show(&ctx, |ui| {
-                    egui::Frame::new()
-                        .fill(egui::Color32::from_black_alpha(220))
-                        .corner_radius(8)
-                        .inner_margin(10)
-                        .show(ui, |ui| {
-                            ui.label(egui::RichText::new(toast).color(egui::Color32::WHITE));
-                        });
+                    ui.with_layout(egui::Layout::bottom_up(egui::Align::RIGHT), |ui| {
+                        for toast in self.state.ui.toasts.iter().rev() {
+                            let (icon, color) = match toast.kind {
+                                crate::state::ToastKind::Info => (theme::Icon::Info, t.info),
+                                crate::state::ToastKind::Success => (theme::Icon::Check, t.ok),
+                                crate::state::ToastKind::Warning => (theme::Icon::Warning, t.warn),
+                                crate::state::ToastKind::Error => (theme::Icon::Warning, t.err),
+                            };
+                            let response = t
+                                .overlay_frame()
+                                .show(ui, |ui| {
+                                    ui.horizontal(|ui| {
+                                        let (rect, _) = ui.allocate_exact_size(
+                                            egui::vec2(16.0, 16.0),
+                                            egui::Sense::hover(),
+                                        );
+                                        ui::theme::paint_icon(ui.painter(), rect, icon, color);
+                                        ui.label(
+                                            egui::RichText::new(&toast.text)
+                                                .size(theme::FONT_BODY)
+                                                .color(t.text_primary),
+                                        );
+                                    });
+                                })
+                                .response;
+                            // 带来源页的提示可点击直达，避免用户只知道“保存了”却找不到。
+                            if toast.page.is_some() {
+                                let response = response.interact(egui::Sense::click());
+                                if response.hovered() {
+                                    ui.ctx().set_cursor_icon(egui::CursorIcon::PointingHand);
+                                }
+                                if response.clicked() {
+                                    jump = toast.page;
+                                }
+                            }
+                            ui.add_space(theme::SPACE_2);
+                        }
+                    });
                 });
+            if let Some(page) = jump {
+                self.state.settings.page = page;
+                self.state.mark_dirty();
+                self.state.ui.toasts.clear();
+            }
         }
 
         self.save_window_rect(&ctx);
@@ -844,6 +1156,9 @@ fn get_json<T: serde::de::DeserializeOwned>(url: &str, user_agent: &str) -> Resu
         Err(ureq::Error::Transport(error)) => Err(format!("network request failed: {error}")),
     }
 }
+
+/// 自动检查更新的最小间隔：GitHub 未认证 API 的限额是每小时 60 次。
+const UPDATE_CHECK_INTERVAL_MS: u64 = 24 * 60 * 60 * 1000;
 
 fn now_ms() -> u64 {
     SystemTime::now()

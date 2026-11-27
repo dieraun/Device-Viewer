@@ -13,7 +13,6 @@ struct Row {
 }
 
 pub fn show(ui: &mut egui::Ui, state: &mut AppState, i18n: I18n) {
-    widgets::page_header(ui, i18n, "nav.checklist", "page.checklist.sub");
     let snapshot = state.snapshot.clone();
 
     let mut rows = Vec::new();
@@ -232,38 +231,36 @@ pub fn show(ui: &mut egui::Ui, state: &mut AppState, i18n: I18n) {
     });
     ui.add_space(6.0);
 
-    egui::ScrollArea::vertical()
-        .auto_shrink([false, false])
-        .show(ui, |ui| {
-            egui::Grid::new("checklist-grid")
-                .num_columns(3)
-                .striped(true)
-                .spacing([16.0, 6.0])
-                .show(ui, |ui| {
-                    for header in [
-                        i18n.t("common.page"),
-                        i18n.t("common.status"),
-                        i18n.t("common.detail"),
-                    ] {
-                        ui.label(RichText::new(header).weak());
+    widgets::page_body(ui, |ui| {
+        egui::Grid::new("checklist-grid")
+            .num_columns(3)
+            .striped(true)
+            .spacing([16.0, 6.0])
+            .show(ui, |ui| {
+                for header in [
+                    i18n.t("common.page"),
+                    i18n.t("common.status"),
+                    i18n.t("common.detail"),
+                ] {
+                    ui.label(RichText::new(header).weak());
+                }
+                ui.end_row();
+                for row in &rows {
+                    ui.label(i18n.t(row.page.title_key()));
+                    if row.available {
+                        widgets::badge(ui, i18n.t("app.available"), widgets::BadgeKind::Ok);
+                    } else {
+                        widgets::badge(
+                            ui,
+                            i18n.t("app.not_available"),
+                            widgets::BadgeKind::Warning,
+                        );
                     }
+                    ui.label(&row.detail);
                     ui.end_row();
-                    for row in &rows {
-                        ui.label(i18n.t(row.page.title_key()));
-                        if row.available {
-                            widgets::badge(ui, i18n.t("app.available"), widgets::BadgeKind::Ok);
-                        } else {
-                            widgets::badge(
-                                ui,
-                                i18n.t("app.not_available"),
-                                widgets::BadgeKind::Warning,
-                            );
-                        }
-                        ui.label(&row.detail);
-                        ui.end_row();
-                    }
-                });
-        });
+                }
+            });
+    });
 
     if !state.permission.items.is_empty() {
         ui.add_space(8.0);

@@ -5,11 +5,10 @@ use egui::RichText;
 use crate::i18n::I18n;
 use crate::log;
 use crate::state::{AppState, CodeLanguage};
+use crate::ui::theme;
 use crate::ui::widgets;
 
 pub fn show(ui: &mut egui::Ui, state: &mut AppState, i18n: I18n) {
-    widgets::page_header(ui, i18n, "nav.dev", "page.dev.sub");
-
     let selected = state
         .snapshot
         .vulkan
@@ -84,7 +83,11 @@ pub fn show(ui: &mut egui::Ui, state: &mut AppState, i18n: I18n) {
         ui.horizontal(|ui| {
             ui.label(RichText::new(i18n.t("dev.log")).strong());
             if let Some(path) = log::path() {
-                ui.label(RichText::new(path.display().to_string()).weak().size(11.0));
+                ui.label(
+                    RichText::new(path.display().to_string())
+                        .weak()
+                        .size(theme::FONT_CAPTION),
+                );
             }
             if ui.button(i18n.t("common.clear")).clicked() {
                 log::clear();
@@ -104,7 +107,7 @@ pub fn show(ui: &mut egui::Ui, state: &mut AppState, i18n: I18n) {
                             entry.message
                         ))
                         .monospace()
-                        .size(11.0),
+                        .size(theme::FONT_CAPTION),
                     );
                 }
                 if entries.is_empty() {

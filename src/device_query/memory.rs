@@ -49,8 +49,10 @@ pub async fn query(cancel: &CancellationToken) -> QueryResult<MemoryInfo> {
         Ok(MemoryInfo {
             total_bytes: total,
             used_bytes: used,
-            free_bytes: total.saturating_sub(used),
-            available_bytes: total.saturating_sub(used),
+            // free 是真正闲置的物理页；available 含可回收缓存，二者不同。
+            // 用 total - used 充当 available 会系统性低估可用内存。
+            free_bytes: system.free_memory(),
+            available_bytes: system.available_memory(),
             swap_total_bytes: swap_total,
             swap_used_bytes: swap_used,
             modules: Vec::new(),

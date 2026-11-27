@@ -4,7 +4,9 @@
 //! itself, which makes omissions visible during development instead of showing
 //! an empty label.
 
+use std::collections::HashMap;
 use std::path::Path;
+use std::sync::OnceLock;
 
 use serde::{Deserialize, Serialize};
 
@@ -38,6 +40,8 @@ impl Language {
 fn windows_language() -> Option<Language> {
     use windows::Win32::Globalization::GetUserDefaultUILanguage;
 
+    // SAFETY: GetUserDefaultUILanguage 无参数、只读当前用户的语言设置，
+    // 任何线程都可以调用，返回 u16 语言 ID 且不会失败。
     let language_id = unsafe { GetUserDefaultUILanguage() };
     match language_id & 0x03ff {
         0x04 => Some(Language::Chinese),
@@ -148,22 +152,60 @@ impl I18n {
     }
 
     pub fn t(self, key: &'static str) -> &'static str {
-        for (candidate, en, zh) in STRINGS {
-            if *candidate == key {
-                return match self.language {
-                    Language::English => en,
-                    Language::Chinese => zh,
-                };
-            }
+        match lookup().get(key) {
+            Some((en, zh)) => match self.language {
+                Language::English => *en,
+                Language::Chinese => *zh,
+            },
+            None => key,
         }
-        key
     }
 }
 
-/// Adds a CJK-capable system font as a fallback. This is deliberately
-/// best-effort: a missing font only affects glyph coverage, never startup.
+/// Resolves keys through a hash map that is built once on first use. The table
+/// holds hundreds of entries and every frame looks up dozens of keys, so the
+/// previous linear scan was pure overhead.
+fn lookup() -> &'static HashMap<&'static str, (&'static str, &'static str)> {
+    static LOOKUP: OnceLock<HashMap<&'static str, (&'static str, &'static str)>> = OnceLock::new();
+    LOOKUP.get_or_init(|| {
+        STRINGS
+            .iter()
+            .map(|(key, en, zh)| (*key, (*en, *zh)))
+            .collect()
+    })
+}
+
+/// Whether a CJK-capable font was found on this machine.
+static CJK_AVAILABLE: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
+
+/// Returns true when the CJK fallback font was installed, so pages can warn
+/// about missing glyphs instead of rendering tofu boxes.
+pub fn cjk_available() -> bool {
+    CJK_AVAILABLE.load(std::sync::atomic::Ordering::Relaxed)
+}
+
+/// Installs the UI font stack: Inter when present on the system, egui's
+/// bundled default otherwise, plus a CJK-capable fallback. Best effort: a
+/// missing font only affects glyph coverage, never startup.
 pub fn install_fonts(ctx: &egui::Context) {
-    let candidates: &[&str] = if cfg!(target_os = "windows") {
+    let ui_candidates: &[&str] = if cfg!(target_os = "windows") {
+        &[
+            r"C:\Windows\Fonts\Inter-Regular.ttf",
+            r"C:\Windows\Fonts\Inter.ttf",
+        ]
+    } else if cfg!(target_os = "macos") {
+        &[
+            "/Library/Fonts/Inter.ttf",
+            "/System/Library/Fonts/Inter.ttf",
+        ]
+    } else {
+        &[
+            "/usr/share/fonts/truetype/inter/Inter-Regular.ttf",
+            "/usr/share/fonts/opentype/inter/Inter-Regular.otf",
+            "/usr/share/fonts/Inter/Inter-Regular.ttf",
+        ]
+    };
+    let cjk_candidates: &[&str] = if cfg!(target_os = "windows") {
         &[
             r"C:\Windows\Fonts\msyh.ttc",
             r"C:\Windows\Fonts\msyhbd.ttc",
@@ -185,21 +227,35 @@ pub fn install_fonts(ctx: &egui::Context) {
         ]
     };
 
-    let Some(bytes) = candidates
+    let mut fonts = egui::FontDefinitions::default();
+    if let Some(bytes) = ui_candidates
         .iter()
         .find_map(|path| std::fs::read(Path::new(path)).ok())
-    else {
-        return;
-    };
-
-    let mut fonts = egui::FontDefinitions::default();
-    let name = "device-viewer-cjk".to_owned();
-    fonts.font_data.insert(
-        name.clone(),
-        std::sync::Arc::new(egui::FontData::from_owned(bytes)),
-    );
-    for family in [egui::FontFamily::Proportional, egui::FontFamily::Monospace] {
-        fonts.families.entry(family).or_default().push(name.clone());
+    {
+        let name = "device-viewer-ui".to_owned();
+        fonts.font_data.insert(
+            name.clone(),
+            std::sync::Arc::new(egui::FontData::from_owned(bytes)),
+        );
+        fonts
+            .families
+            .entry(egui::FontFamily::Proportional)
+            .or_default()
+            .insert(0, name);
+    }
+    if let Some(bytes) = cjk_candidates
+        .iter()
+        .find_map(|path| std::fs::read(Path::new(path)).ok())
+    {
+        let name = "device-viewer-cjk".to_owned();
+        fonts.font_data.insert(
+            name.clone(),
+            std::sync::Arc::new(egui::FontData::from_owned(bytes)),
+        );
+        for family in [egui::FontFamily::Proportional, egui::FontFamily::Monospace] {
+            fonts.families.entry(family).or_default().push(name.clone());
+        }
+        CJK_AVAILABLE.store(true, std::sync::atomic::Ordering::Relaxed);
     }
     ctx.set_fonts(fonts);
 }
@@ -270,6 +326,23 @@ const STRINGS: &[(&str, &str, &str)] = &[
     ("app.minimize", "Minimize", "最小化"),
     ("app.show_details", "Show details", "显示详情"),
     ("app.hide_details", "Hide details", "隐藏详情"),
+    ("section.overview", "Overview", "概览"),
+    ("section.performance", "Performance", "性能"),
+    ("section.graphics", "Graphics", "图形"),
+    ("section.hardware", "Hardware", "硬件"),
+    ("section.snapshots", "Snapshots", "快照"),
+    ("section.settings", "Settings", "设置"),
+    ("nav.collapse", "Collapse sidebar", "收起侧栏"),
+    ("nav.expand", "Expand sidebar", "展开侧栏"),
+    ("shell.more", "More", "更多"),
+    (
+        "shell.more_hint",
+        "Export, snapshots and settings",
+        "导出、快照与设置",
+    ),
+    ("shell.palette", "Command palette", "命令面板"),
+    ("shell.palette_hint", "Jump to a page...", "搜索页面…"),
+    ("shell.palette_empty", "No matching page", "没有匹配的页面"),
     ("nav.overview", "Overview", "概览"),
     ("nav.cpu", "CPU", "处理器"),
     ("nav.pcie", "PCI / PCIe", "PCI / PCIe"),
@@ -397,6 +470,9 @@ const STRINGS: &[(&str, &str, &str)] = &[
     ),
     ("common.vendor", "Vendor", "厂商"),
     ("common.model", "Model", "型号"),
+    ("common.bios", "BIOS", "BIOS"),
+    ("common.os", "Operating system", "操作系统"),
+    ("warnings.summary", "Warnings", "警告"),
     ("common.name", "Name", "名称"),
     ("common.version", "Version", "版本"),
     ("common.driver", "Driver", "驱动"),
@@ -416,6 +492,9 @@ const STRINGS: &[(&str, &str, &str)] = &[
     ("common.speed", "Speed", "速度"),
     ("common.width", "Width", "宽度"),
     ("common.architecture", "Architecture", "架构"),
+    ("cpu.identity", "Processor", "处理器信息"),
+    ("cpu.physical", "physical", "物理"),
+    ("cpu.logical", "logical", "逻辑"),
     ("common.cores", "Cores", "核心"),
     ("common.threads", "Threads", "线程"),
     ("common.frequency", "Frequency", "频率"),
@@ -658,6 +737,11 @@ const STRINGS: &[(&str, &str, &str)] = &[
     ("snapshot.saved", "Snapshot saved", "快照已保存"),
     ("snapshot.deleted", "Snapshot deleted", "快照已删除"),
     (
+        "snapshot.delete_confirm",
+        "Delete this snapshot? This cannot be undone.",
+        "删除这个快照？此操作不可撤销。",
+    ),
+    (
         "snapshot.import",
         "Import .dvsnap / JSON",
         "导入 .dvsnap / JSON",
@@ -757,6 +841,11 @@ const STRINGS: &[(&str, &str, &str)] = &[
         "主题会立即生效。",
     ),
     (
+        "settings.font_missing",
+        "No CJK font found; Chinese text may show as boxes",
+        "未找到中文字体，中文可能显示为方块",
+    ),
+    (
         "settings.path_hint",
         "Portable mode changes where new files are written; existing files are not moved.",
         "便携模式只改变新文件的写入位置，不会移动已有文件。",
@@ -793,6 +882,11 @@ const STRINGS: &[(&str, &str, &str)] = &[
     ("overview.motherboard", "Motherboard & BIOS", "主板与 BIOS"),
     ("overview.bandwidth", "Memory bandwidth", "内存带宽"),
     ("overview.warnings", "Collection notes", "采集说明"),
+    (
+        "overview.collect_note",
+        "Read-only collection: nothing on this system is modified.",
+        "只读采集，不会修改系统设置。",
+    ),
     (
         "overview.no_data",
         "No data collected for this section",
@@ -842,6 +936,7 @@ const STRINGS: &[(&str, &str, &str)] = &[
     ("checklist.items", "Capability items", "能力项"),
     ("common.adapters", "Adapters", "适配器"),
     ("common.apply", "Apply", "应用"),
+    ("common.cancel", "Cancel", "取消"),
     ("common.clear", "Clear", "清除"),
     ("common.delete", "Delete", "删除"),
     ("common.detail", "Detail", "详情"),
@@ -858,8 +953,12 @@ const STRINGS: &[(&str, &str, &str)] = &[
     ("common.system_memory", "System memory", "系统内存"),
     ("common.threadgroup", "Threadgroup", "线程组"),
     ("common.vid_pid", "VID:PID", "厂商:设备"),
+    ("common.swap", "Swap", "交换空间"),
+    ("common.renderer", "Renderer", "渲染器"),
+    ("common.registry_id", "Registry ID", "注册表 ID"),
     ("common.vram", "VRAM", "显存"),
     ("common.warnings", "Warnings", "警告"),
+    ("compare.all", "All", "全部"),
     ("compare.added", "Added", "新增"),
     ("compare.after", "After", "对比后"),
     ("compare.baseline", "Baseline", "基线"),
@@ -872,6 +971,12 @@ const STRINGS: &[(&str, &str, &str)] = &[
     ("display.adapters", "Display adapters", "显示适配器"),
     ("display.position", "Position", "位置"),
     ("display.primary", "Primary", "主显示器"),
+    ("display.primary_unknown", "Primary: unknown", "主屏：未知"),
+    (
+        "loading.reading",
+        "Reading hardware information...",
+        "正在读取硬件信息…",
+    ),
     (
         "loading.hint",
         "This usually takes a few seconds",
@@ -1004,8 +1109,8 @@ const STRINGS: &[(&str, &str, &str)] = &[
     ("about.legal", "Legal", "法律信息"),
     (
         "about.legal_hint",
-        "Source-visible proprietary software. Commercial use requires written permission.",
-        "源码可见的专有软件，商业使用必须获得书面授权。",
+        "Open-source hardware inspector, dual licensed under MIT OR Apache-2.0.",
+        "开源硬件信息查看器，MIT OR Apache-2.0 双许可。",
     ),
     ("about.legal_statement", "Legal statement", "法律声明"),
     ("about.privacy", "Privacy statement", "隐私声明"),

@@ -36,6 +36,8 @@ pub fn query_from_context(gl: &glow::Context) -> OpenGlInfo {
         ..OpenGlInfo::default()
     };
 
+    // SAFETY: 调用方保证这里运行在拥有当前 GL 上下文的渲染线程上
+    // （见 query_from_context 的文档），且 glow 已解析好函数指针。
     unsafe {
         info.vendor = Some(gl.get_parameter_string(glow::VENDOR));
         info.renderer = Some(gl.get_parameter_string(glow::RENDERER));

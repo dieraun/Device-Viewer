@@ -120,6 +120,7 @@ mod win_audio {
 
     impl Drop for DeviceInfoSet {
         fn drop(&mut self) {
+            // SAFETY: 句柄只被这个 guard 持有，Drop 只释放一次。
             unsafe {
                 let _ = SetupDiDestroyDeviceInfoList(self.0);
             }
@@ -127,6 +128,7 @@ mod win_audio {
     }
 
     pub(super) fn enumerate(warnings: &mut Vec<String>) -> Vec<AudioDevice> {
+        // SAFETY: 参数都是本函数构造的有效常量；返回句柄立即交给 guard。
         let set = match unsafe {
             SetupDiGetClassDevsW(
                 Some(&GUID_DEVCLASS_MEDIA),
@@ -146,6 +148,7 @@ mod win_audio {
         for index in 0..256u32 {
             let mut data = SP_DEVINFO_DATA::default();
             data.cbSize = std::mem::size_of::<SP_DEVINFO_DATA>() as u32;
+            // SAFETY: set 有效，data 已填好 cbSize 并由 API 写入。
             if unsafe { SetupDiEnumDeviceInfo(set.0, index, &mut data) }.is_err() {
                 break;
             }
@@ -172,26 +175,52 @@ mod win_audio {
         data: &SP_DEVINFO_DATA,
         property: windows::Win32::Devices::DeviceAndDriverInstallation::SETUP_DI_REGISTRY_PROPERTY,
     ) -> Option<String> {
-        let mut buffer = [0u16; 512];
+        // 固定 512 wchar 缓冲会把长设备名截断；先探所需字节数再按需分配。
+        let mut probe = [0u8; 8];
         let mut required = 0u32;
+        // SAFETY: set/data 属于同一设备，探针缓冲区为 8 字节，API 只在容量
+        // 内写入并用 required 报告实际所需长度。
+        match unsafe {
+            SetupDiGetDeviceRegistryPropertyW(
+                set,
+                data,
+                property,
+                None,
+                Some(&mut probe),
+                Some(&mut required),
+            )
+        } {
+            Ok(()) => return decode_utf16(&probe),
+            Err(_) if required > 0 => {}
+            Err(_) => return None,
+        }
+
+        let mut buffer = vec![0u8; required as usize];
+        let mut used = 0u32;
+        // SAFETY: 缓冲区按 required 分配，API 最多写 required 字节。
         unsafe {
             SetupDiGetDeviceRegistryPropertyW(
                 set,
                 data,
                 property,
                 None,
-                Some(std::slice::from_raw_parts_mut(
-                    buffer.as_mut_ptr() as *mut u8,
-                    buffer.len() * 2,
-                )),
-                Some(&mut required),
+                Some(buffer.as_mut_slice()),
+                Some(&mut used),
             )
+            .ok()?;
         }
-        .ok()?;
+        decode_utf16(&buffer)
+    }
 
-        let len = (required as usize / 2).min(buffer.len()).saturating_sub(1);
-        let text = String::from_utf16_lossy(&buffer[..len]);
-        (!text.trim().is_empty()).then_some(text)
+    fn decode_utf16(bytes: &[u8]) -> Option<String> {
+        let words: Vec<u16> = bytes
+            .chunks_exact(2)
+            .map(|pair| u16::from_le_bytes([pair[0], pair[1]]))
+            .take_while(|word| *word != 0)
+            .collect();
+        let text = String::from_utf16_lossy(&words);
+        let text = text.trim();
+        (!text.is_empty()).then(|| text.to_string())
     }
 }
 

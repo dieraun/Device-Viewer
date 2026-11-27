@@ -2,15 +2,13 @@
 
 **适用对象：** Device Viewer 仓库维护者  
 **适用平台：** Windows / Linux / macOS  
-**仓库类型：** 源码可见的专有许可项目，**不是开源项目**
+**仓库类型：** 开源项目（MIT OR Apache-2.0 双许可）
 
 > **法律前提**
 >
-> Device Viewer 的完整著作权归原作者独有。本项目采用定制化专有许可，不是 MIT、Apache-2.0、GPL、BSD、MPL 或任何 OSI 认可的开源许可证。
+> Device Viewer 采用 MIT OR Apache-2.0 双许可，是 OSI 认可的开源软件。
 >
-> 个人、非营利组织可免费本地使用、学习研究。所有盈利组织、商业团队、企业、工作室、付费开发者，未经作者书面授权，禁止使用、复制、修改、衍生、二次开源、二次闭源、二次打包、二次分发、二次发布、商用售卖、集成进商业项目、SaaS、付费工具、课程售卖。商业授权邮箱：**yanruoxinsu2@outlook.com**。
->
-> 任何修改源代码的行为，必须在本仓库提交 **Modify Source Report** Issue 报备；未报备视为侵权。完整条款见 [`LICENSE`](LICENSE)、[`LEGAL_STATEMENT.md`](LEGAL_STATEMENT.md)。
+> 著作权由作者与贡献者共同保有，按所选许可协议授权；说明见 [`LEGAL_STATEMENT.md`](LEGAL_STATEMENT.md)，许可原文见 [`LICENSE-MIT`](LICENSE-MIT) 与 [`LICENSE-APACHE`](LICENSE-APACHE)。
 
 ---
 
@@ -26,7 +24,8 @@ Cargo.lock                  # 应用项目必须提交，用于可复现构建
 build.rs
 .gitignore
 README.md
-LICENSE
+LICENSE-MIT
+LICENSE-APACHE
 LEGAL_STATEMENT.md
 PRIVACY.md
 DISCLAIMER.md
@@ -36,7 +35,6 @@ REPOSITORY_GUIDE.md
   ISSUE_TEMPLATE/
     bug_report.md
     feature_request.md
-    modify_source.md
   workflows/
     release.yml
 packaging/
@@ -90,19 +88,16 @@ git restore --staged <path>
 确认五个文件均为最新版本，且没有互相冲突：
 
 ```powershell
-Get-Item LICENSE, LEGAL_STATEMENT.md, PRIVACY.md, DISCLAIMER.md, README.md |
+Get-Item LICENSE-MIT, LICENSE-APACHE, LEGAL_STATEMENT.md, PRIVACY.md, DISCLAIMER.md, README.md |
   Select-Object Name, Length, LastWriteTime
 ```
 
-确认 `LICENSE` 中至少包含：
+确认两个许可文件均为官方原文，且与 `Cargo.toml` 的 `license` 字段一致：
 
-- 著作权归原作者独有；
-- 非 OSI 开源许可声明；
-- 个人/非营利免费本地使用；
-- 盈利组织未经书面授权禁止使用、修改、分发、商用；
-- 修改必须提交 Issue 报备；
-- 禁止二次开源、二次闭源、二次打包、二次发布；
-- 侵权追责与管辖法律。
+- `LICENSE-MIT` 为 MIT 原文，版权行为 `Copyright (c) 2026 Device Viewer authors`；
+- `LICENSE-APACHE` 的 SHA-256 为 `cfc7749b96f63bd31c3c42b5c471bf756814053e847c10f3eb003417bc523d30`（202 行 / 11,358 字节）；
+- `Cargo.toml` 使用 `license = "MIT OR Apache-2.0"`，不保留 `license-file`；
+- 根目录不存在名为 `LICENSE` 或其他 `LICENSE-*` 的历史协议文件。
 
 ### 1.4 检查构建与测试
 
@@ -128,14 +123,14 @@ Get-Content .github/workflows/release.yml -TotalCount 40
 
 - 触发条件为 `v*` 标签；
 - 三个平台 job 均存在；
-- 每个打包步骤都复制了四个法律文档；
+- 每个打包步骤都复制了五个法律文档（`LICENSE-MIT`、`LICENSE-APACHE`、`LEGAL_STATEMENT.md`、`PRIVACY.md`、`DISCLAIMER.md`）；
 - 没有写死任何 token、密码、证书、私钥；
 - `publish` job 使用 `${{ github.token }}`，不是个人 PAT；
 - 产物命名为 `DeviceViewer-<platform>-<arch>-<version>`。
 
 ### 1.6 检查 Issue 模板
 
-确认三个模板均存在：
+确认两个模板均存在：
 
 ```powershell
 Get-ChildItem .github/ISSUE_TEMPLATE
@@ -143,11 +138,9 @@ Get-ChildItem .github/ISSUE_TEMPLATE
 
 每个模板都必须包含：
 
-- 著作权归属；
-- 盈利组织禁止私自商用/二次分发；
-- 修改必须 Issue 报备；
-- 侵权追责条款；
-- 非 OSI 开源声明。
+- 完整的复现步骤或需求背景字段；
+- 提交前检查项（含"已搜索现有 Issue"与脱敏提醒）；
+- 不含授权申请、修改登记或追责类表述。
 
 ### 1.7 检查敏感信息
 
@@ -250,13 +243,13 @@ git commit -m "chore: initial Device Viewer repository"
 4. **Description** 建议：
 
    ```text
-   Cross-platform hardware information viewer (source-visible proprietary license).
+   Cross-platform hardware information viewer, licensed under MIT OR Apache-2.0.
    ```
 
 5. 选择 **Private** 或 **Public**：
    - 准备阶段建议 **Private**，避免未完成的法律/发布材料提前公开；
    - 确认无误后再转为 Public；
-   - 无论 Public 还是 Private，`LICENSE` 的专有许可均适用。
+   - 无论 Public 还是 Private，MIT OR Apache-2.0 双许可均适用。
 6. **不要**勾选：
    - Add a README file；
    - Add .gitignore；
@@ -323,9 +316,9 @@ git push -u origin main
 
 在 GitHub 网页确认：
 
-- 根目录存在 `LICENSE`、`LEGAL_STATEMENT.md`、`PRIVACY.md`、`DISCLAIMER.md`、`README.md`、`REPOSITORY_GUIDE.md`；
+- 根目录存在 `LICENSE-MIT`、`LICENSE-APACHE`、`LEGAL_STATEMENT.md`、`PRIVACY.md`、`DISCLAIMER.md`、`README.md`、`REPOSITORY_GUIDE.md`；
 - `.github/workflows/release.yml` 存在；
-- `.github/ISSUE_TEMPLATE/` 下三个模板存在；
+- `.github/ISSUE_TEMPLATE/` 下两个模板存在；
 - `.github/CONTRIBUTING.md` 存在；
 - `src/`、`tests/`、`packaging/` 结构完整；
 - `Cargo.lock` 已提交；
@@ -346,7 +339,7 @@ git push -u origin main
 - **Description**：
 
   ```text
-  Cross-platform hardware information viewer for Windows, Linux and macOS. Source-visible proprietary license; commercial use requires written permission.
+  Cross-platform hardware information viewer for Windows, Linux and macOS, licensed under MIT OR Apache-2.0.
   ```
 
 - **Website**：可留空，或填写发布页/文档页；
@@ -364,13 +357,13 @@ git push -u origin main
 
 #### 5.1.3 Features
 
-- **Issues**：**开启**。这是 Modify Source 报备、Bug 反馈、功能建议的唯一入口。
+- **Issues**：**开启**。这是缺陷反馈与功能建议的入口。
 - **Discussions**：**建议关闭**。
-  - 如开启，必须新建并置顶“法律声明”帖子，说明本项目不是开源项目、禁止商用与二次发布；
-  - Discussions 中的内容同样受 `LICENSE` 约束；
+  - 如开启，建议置顶一份说明，指明本项目的许可、行为准则与反馈渠道；
+  - Discussions 中的内容同样受行为准则约束；
   - 如无专人维护，关闭可减少侵权与误导风险。
 - **Projects**：可选。若使用，建议设为私有或仅维护者可见。
-- **Wiki**：**建议关闭**。避免出现过期文档、非官方安装包或与 `LICENSE` 冲突的内容。
+- **Wiki**：**建议关闭**。避免出现过期文档、非官方安装包或与项目许可冲突的内容。
 - **Sponsorships**：**关闭**，除非你已准备好处理商业赞助与授权边界。
 - **Preserve this repository**：不需要为普通项目开启。
 
@@ -380,10 +373,10 @@ git push -u origin main
 - **Allow squash merging**：建议开启；
 - **Allow rebase merging**：可关闭；
 - **Always suggest updating pull request branches**：可关闭；
-- **Allow auto-merge**：**必须关闭**。本项目不接受未经报备的自动合并。
+- **Allow auto-merge**：可关闭。若开启，须同时启用必需的状态检查与 review 规则。
 - **Automatically delete head branches**：建议开启，减少残留分支。
 
-> GitHub 公共仓库无法彻底关闭“外部用户打开 PR”的入口。这里的策略是：**PR 可以出现，但未报备、未获邀的 PR 不得合并**。合并权必须由分支规则集收归维护者。
+> 开源后任何用户都可以从 Fork 打开 PR。合并门槛由分支规则集保证：**CI 全绿 + 至少一名维护者 review 通过**才允许合并。
 
 ### 5.2 Actions（工作流）
 
@@ -514,7 +507,6 @@ permissions:
 | --- | --- | --- |
 | `bug` | 红色 | 缺陷 |
 | `enhancement` | 蓝色 | 功能建议 |
-| `modify-source` | 紫色 | 源码修改报备 |
 | `legal` | 黑色 | 法律/授权/侵权事项 |
 | `needs-info` | 黄色 | 信息不足 |
 | `security` | 深红 | 安全问题（公开 Issue 中不要披露细节） |
@@ -525,7 +517,7 @@ Issue 模板中的 `labels` 只有在标签已存在时才会生效。若模板�
 
 进入 **Settings → Moderation**（如可用）：
 
-- **Interaction limits**：遇到大规模骚扰、垃圾 Issue 或侵权争吵时可临时开启；
+- **Interaction limits**：遇到大规模骚扰、垃圾 Issue 或版权争议时可临时开启；
 - **Blocked users**：仅在有明确理由时使用；
 - 不要因为正常的技术质疑而封禁用户；但可对人身攻击、泄露隐私、发布侵权包的行为采取限制。
 
@@ -541,19 +533,17 @@ Issue 模板中的 `labels` 只有在标签已存在时才会生效。若模板�
 
 ### 6.1 新建 Issue 测试
 
-进入 **Issues → New issue**，确认出现三个选项：
+进入 **Issues → New issue**，确认出现两个选项：
 
 1. **Bug report / 缺陷反馈**
 2. **Feature request / 功能建议**
-3. **Modify Source Report / 源码修改报备**
 
 逐个打开，确认：
 
 - 标题前缀正确；
-- 法律声明完整；
 - 表单字段可填写；
-- 没有泄露隐私的必填项；
-- Modify Source 模板明确写明“不报备即侵权”。
+- 提交前检查项完整；
+- 没有泄露隐私的必填项。
 
 测试完成后，不要提交无意义的测试 Issue；如已提交，关闭并标注 `invalid`。
 
@@ -561,30 +551,22 @@ Issue 模板中的 `labels` 只有在标签已存在时才会生效。若模板�
 
 打开 `.github/CONTRIBUTING.md`，确认包含：
 
-- 本项目不是 OSI 开源项目；
-- 不接受随意 PR；
-- 所有源码修改必须提交 Modify Source Issue；
-- 商业使用必须邮件申请书面授权；
-- 禁止 Fork 后二次发布、商用；
-- 侵权追责条款；
-- 商业授权邮箱 `yanruoxinsu2@outlook.com`。
+- 行为准则（Contributor Covenant 2.1）；
+- 开发环境（Rust 1.100+、`cargo fmt`、`cargo clippy -- -D warnings`、`cargo test`）；
+- Fork → 分支 → PR → CI → review 的提交流程；
+- 代码规范与提交信息规范；
+- "提交即同意按 MIT OR Apache-2.0 双许可授权"的声明；
+- 安全漏洞私下上报渠道。
 
 GitHub 会在新建 Issue/PR 时显示 `CONTRIBUTING.md` 链接；如未显示，检查文件名大小写与路径是否正确。
 
 ### 6.3 检查模板中的法律条款
 
-每个模板必须包含四项核心约束：
+每个模板必须满足：
 
-1. 著作权归属；
-2. 盈利组织禁止私自商用、二次分发；
-3. 修改必须 Issue 报备；
-4. 侵权追责。
-
-同时必须明确：
-
-- 本项目不属于 OSI 开源协议；
-- 禁止 Fork 后二次发布、商用；
-- 商业授权必须书面确认。
+- 头部为 Front Matter（`name`、`about`、`title`、`labels`），不含任何法律声明引用块；
+- 包含"我已搜索现有 Issue"与脱敏提醒两项检查；
+- 不含授权申请、修改登记或侵权追责表述。
 
 ---
 
@@ -657,7 +639,7 @@ git push origin v1.0.0
 
 1. **metadata**：校验标签，输出版本与 tag；
 2. **build-windows**：MSVC x86_64 构建，打包 zip，生成 SHA-256；
-3. **build-macos**：x86_64 与 aarch64 矩阵构建，打包 zip，附加签名/公证说明；
+3. **build-macos**：x86_64 矩阵构建（aarch64 默认不开启，需要时在矩阵中取消注释），打包 tar.gz，附加签名/公证说明；
 4. **build-linux**：musl x86_64 构建，打包 tar.gz，生成 SHA-256；
 5. **publish**：下载全部 artifact，创建或更新 GitHub Release。
 
@@ -675,20 +657,21 @@ git push origin v1.0.0
 
 - `DeviceViewer-windows-x86_64-1.0.0.zip`
 - `DeviceViewer-windows-x86_64-1.0.0.zip.sha256`
-- `DeviceViewer-macos-x86_64-1.0.0.zip`
-- `DeviceViewer-macos-x86_64-1.0.0.zip.sha256`
-- `DeviceViewer-macos-aarch64-1.0.0.zip`
-- `DeviceViewer-macos-aarch64-1.0.0.zip.sha256`
+- `DeviceViewer-macos-x86_64-1.0.0.tar.gz`
+- `DeviceViewer-macos-x86_64-1.0.0.tar.gz.sha256`
 - `DeviceViewer-linux-x86_64-1.0.0.tar.gz`
 - `DeviceViewer-linux-x86_64-1.0.0.tar.gz.sha256`
+- （可选）矩阵启用 aarch64 时另有 `DeviceViewer-macos-aarch64-1.0.0.tar.gz` 与其 `.sha256`
 
 每个归档必须包含：
 
 - `DeviceViewer` 或 `DeviceViewer.exe`
-- `LICENSE`
+- `LICENSE-MIT`
+- `LICENSE-APACHE`
 - `LEGAL_STATEMENT.md`
 - `PRIVACY.md`
 - `DISCLAIMER.md`
+- `THIRD_PARTY_NOTICES.md`
 - `README_PACKAGE.md`
 
 macOS 归档还应包含 `SIGNING_AND_NOTARIZATION.txt`。
@@ -711,27 +694,15 @@ tar -tzf DeviceViewer-linux-x86_64-1.0.0.tar.gz
 macOS：
 
 ```bash
-shasum -a 256 -c DeviceViewer-macos-aarch64-1.0.0.zip.sha256
+shasum -a 256 -c DeviceViewer-macos-x86_64-1.0.0.tar.gz.sha256
 ```
 
-### 7.6 手动触发工作流
+### 7.6 重跑工作流
 
-只有以下情况使用 **Actions → Release → Run workflow**：
+`.github/workflows/release.yml` 只由推送 `v*` 标签触发，不提供 `workflow_dispatch` 手动入口。需要重跑时：
 
-- 标签推送后工作流因临时网络/缓存失败；
-- 需要在同一 commit 上重跑打包；
-- `publish` 失败但构建 artifact 已成功。
-
-在 `tag` 输入框填写**已存在的标签**，例如 `v1.0.0`。
-
-> **注意：** `workflow_dispatch` 的 `github.ref` 通常是分支，不是标签。构建 job 会检出分支 HEAD。手动触发前必须确认：
->
-> ```powershell
-> git rev-parse main
-> git rev-parse v1.0.0^{commit}
-> ```
->
-> 两者必须相同，否则产物可能不对应标签。更安全的做法是：在失败的那次标签运行中点击 **Re-run jobs**，而不是重新 dispatch。
+- 在失败的那次标签运行页点击 **Re-run jobs**；
+- 若必须换 commit，删除标签后重新打标签再推送（见 7.7）。
 
 ### 7.7 发布失败的处理
 
@@ -789,16 +760,15 @@ shasum -a 256 -c DeviceViewer-macos-aarch64-1.0.0.zip.sha256
 
 - **Bug**：复现、标记版本、脱敏、修复后关联 commit；
 - **Feature**：评估范围、平台、依赖、隐私影响；
-- **Modify Source**：登记编号、核对修改位置与分发情况、确认是否商用；
-- 对未报备的修改，要求补充 Issue；拒绝补充的，按侵权处理。
+- **Security**：转到私下渠道，不在公开 Issue 讨论细节。
 
 ### 8.2 PR 处理
 
-- 未报备、未获邀的 PR：直接关闭，引用 `CONTRIBUTING.md`；
-- 已报备但未获邀的 PR：说明政策后关闭；
-- 获邀 PR：只审查 Issue 范围内的变更；
-- 不合并删除法律文档、改变许可模式、引入未授权依赖的 PR；
-- 不开启 auto-merge。
+- 任何 Fork 的 PR 都可以评审：先看 CI 是否全绿，再看改动范围是否聚焦；
+- 一个 PR 只做一件事，混杂重构或格式化的 PR 要求拆分；
+- 不合并删除版权声明、许可文本或改变许可模式的 PR；
+- 引入新依赖的 PR 须说明许可是否与本项目兼容；
+- 合并后删除 head 分支，保持分支列表干净。
 
 ### 8.3 侵权监测
 
@@ -808,7 +778,7 @@ shasum -a 256 -c DeviceViewer-macos-aarch64-1.0.0.zip.sha256
 - GitHub/Gitee 镜像；
 - 网盘、论坛、课程平台、应用商店；
 - 闲鱼/淘宝等付费分发；
-- 删除 `LICENSE` 或替换署名的 Fork。
+- 分发时删除版权声明、许可文本，或冒充官方发布的副本。
 
 发现侵权时：
 
@@ -820,7 +790,7 @@ shasum -a 256 -c DeviceViewer-macos-aarch64-1.0.0.zip.sha256
 
 ### 8.4 法律文档更新
 
-如修改 `LICENSE`、`LEGAL_STATEMENT.md`、`PRIVACY.md`、`DISCLAIMER.md`：
+如修改 `LICENSE-MIT`、`LICENSE-APACHE`、`LEGAL_STATEMENT.md`、`PRIVACY.md`、`DISCLAIMER.md`：
 
 - 保留历史版本与生效日期；
 - 不要追溯削弱已发布版本的权利；
@@ -914,13 +884,13 @@ git push origin v1.0.0
 
 ## 10. 法律与联系方式
 
-- **商业授权 / 法律事务：** yanruoxinsu2@outlook.com
-- **安全漏洞：** yanruoxinsu2@outlook.com（主题：`[SECURITY] Device Viewer`）
-- **源码修改报备：** 在本仓库提交 **Modify Source Report** Issue
-- **完整条款：** [`LICENSE`](LICENSE)、[`LEGAL_STATEMENT.md`](LEGAL_STATEMENT.md)、[`PRIVACY.md`](PRIVACY.md)、[`DISCLAIMER.md`](DISCLAIMER.md)
+- **问题反馈：** 项目 Issue
+- **安全漏洞：** yanruoxinsu2@outlook.com（主题：`[SECURITY] Device Viewer`），不要公开披露
+- **版权与法律事务：** yanruoxinsu2@outlook.com
+- **完整条款：** [`LICENSE-MIT`](LICENSE-MIT)、[`LICENSE-APACHE`](LICENSE-APACHE)、[`LEGAL_STATEMENT.md`](LEGAL_STATEMENT.md)、[`PRIVACY.md`](PRIVACY.md)、[`DISCLAIMER.md`](DISCLAIMER.md)
 
-> 本项目不是 OSI 开源项目。禁止 Fork 后二次发布、二次开源、二次闭源、二次打包、二次分发、商用售卖、SaaS 集成、付费工具集成或课程售卖。任何商业使用必须提前取得作者书面授权；任何源码修改必须提交 Modify Source Issue 报备。未报备的修改、未授权的商用与二次发布均属于侵权，作者将依法追究民事责任，情节严重的将向公安机关报案。
+> 本项目采用 MIT OR Apache-2.0 双许可，是 OSI 认可的开源软件。任何人可依所选协议使用、修改与分发，只需保留版权声明与许可文本。
 
 ---
 
-**Copyright © Device Viewer 原作者。保留所有权利。**
+**Copyright © Device Viewer authors. Licensed under MIT OR Apache-2.0.**

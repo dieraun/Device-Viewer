@@ -1,5 +1,8 @@
 //! Program entry point: GUI by default, batch CLI when asked.
 
+// 每个 `unsafe` 都必须写明前置条件；缺少说明会在 CI 的 `-D warnings` 下直接失败。
+#![deny(clippy::undocumented_unsafe_blocks)]
+
 mod app;
 mod device_query;
 mod export;
@@ -26,16 +29,21 @@ USAGE:
 
 OPTIONS:
     --cli                 Force the batch/CLI mode (implied by --out/--only/--snapshot).
-    --out <PATH>          Write TXT, Markdown or JSON, chosen from the extension.
+    --out <PATH>          Write .txt, .md/.markdown or .json, chosen from the
+                          extension; "
+    - " writes to standard output.
     --only <LIST>         Comma-separated modules: cpu,memory,pcie,vulkan,opengl,
                           opencl,npu,usb,storage,motherboard,display,directx,metal,
                           openvx,system,network,audio,sensors,bandwidth.
     --snapshot <PATH>     Export an existing .dvsnap/JSON snapshot instead of querying.
     --quiet               Suppress progress and warning chatter.
     --portable            Persist configuration and snapshots beside the executable.
+                          Batch mode never writes configuration, so this flag has
+                          no effect there.
     --completions <SHELL> Print completion script: bash, zsh or powershell.
     --version             Print the version.
     -h, --help            Print this help.
+    --                    Ends the option list; nothing may follow it.
 
 The GUI starts when no batch option is supplied.";
 
@@ -111,6 +119,15 @@ fn parse_args(args: impl Iterator<Item = String>) -> Result<Cli, String> {
             Some((name, value)) => (name.to_string(), Some(value.to_string())),
             None => (argument, None),
         };
+        if name == "--" {
+            if let Some(argument) = args.next() {
+                return Err(format!("unexpected argument `{argument}` after `--`"));
+            }
+            break;
+        }
+        if inline.is_some() && is_boolean_flag(&name) {
+            return Err(format!("`{name}` does not take a value"));
+        }
         let mut take = |label: &str| -> Result<String, String> {
             if let Some(value) = inline.clone() {
                 return Ok(value);
@@ -172,6 +189,13 @@ fn parse_args(args: impl Iterator<Item = String>) -> Result<Cli, String> {
     Ok(cli)
 }
 
+fn is_boolean_flag(name: &str) -> bool {
+    matches!(
+        name,
+        "--cli" | "--quiet" | "-q" | "--portable" | "--version" | "-V" | "--help" | "-h"
+    )
+}
+
 fn run_cli(cli: &Cli) -> Result<(), String> {
     if !cli.quiet {
         log::init(None);
@@ -179,36 +203,62 @@ fn run_cli(cli: &Cli) -> Result<(), String> {
     }
 
     let mut snapshot = if let Some(path) = &cli.snapshot {
-        read_snapshot(path)?
+        let snapshot = read_snapshot(path)?;
+        if snapshot.schema_version < state::SCHEMA_VERSION {
+            let message = format!(
+                "{} was written with schema version {}; reading it as a {} snapshot",
+                path.display(),
+                snapshot.schema_version,
+                state::SCHEMA_VERSION
+            );
+            log::warn(&message);
+            if !cli.quiet {
+                eprintln!("note: {message}");
+            }
+        }
+        snapshot
     } else {
-        let runtime = tokio::runtime::Builder::new_multi_thread()
+        let runtime = tokio::runtime::Builder::new_current_thread()
             .enable_all()
             .build()
             .map_err(|error| format!("cannot start the async runtime: {error}"))?;
         let cancel = CancellationToken::new();
-        runtime.block_on(collect_all(&QueryOptions::default(), &cancel))
+        runtime.block_on(collect_all(&query_options(cli.only.as_deref()), &cancel))
     };
 
     if let Some(only) = &cli.only {
+        // 只裁剪输出内容；未启用的模块已在采集阶段被门控跳过。
         retain_only(&mut snapshot, only);
+        snapshot
+            .failures
+            .retain(|failure| failure.message != device_query::NOT_ENABLED_MESSAGE);
     }
 
     let i18n = I18n::new(Language::from_system());
     let units = device_query::UnitSystem::default();
 
     if let Some(path) = &cli.out {
-        let format = format_for(path);
-        if let Some(parent) = path.parent() {
-            if !parent.as_os_str().is_empty() {
-                std::fs::create_dir_all(parent)
-                    .map_err(|error| format!("cannot create {}: {error}", parent.display()))?;
-            }
-        }
+        let to_stdout = path.as_os_str() == "-";
+        let format = if to_stdout {
+            ExportFormat::Txt
+        } else {
+            format_for(path)?
+        };
         let body = export::render(&snapshot, format, i18n, units);
-        std::fs::write(path, body)
-            .map_err(|error| format!("cannot write {}: {error}", path.display()))?;
-        if !cli.quiet {
-            eprintln!("wrote {}", path.display());
+        if to_stdout {
+            print!("{body}");
+        } else {
+            if let Some(parent) = path.parent() {
+                if !parent.as_os_str().is_empty() {
+                    std::fs::create_dir_all(parent)
+                        .map_err(|error| format!("cannot create {}: {error}", parent.display()))?;
+                }
+            }
+            std::fs::write(path, body)
+                .map_err(|error| format!("cannot write {}: {error}", path.display()))?;
+            if !cli.quiet {
+                eprintln!("wrote {}", path.display());
+            }
         }
     } else {
         print!(
@@ -237,30 +287,65 @@ fn read_snapshot(path: &PathBuf) -> Result<HardwareSnapshot, String> {
     struct Wrapper {
         snapshot: HardwareSnapshot,
     }
-    if let Ok(snapshot) = serde_json::from_slice::<HardwareSnapshot>(&bytes) {
-        return Ok(snapshot);
+    let snapshot = match serde_json::from_slice::<HardwareSnapshot>(&bytes) {
+        Ok(snapshot) => snapshot,
+        Err(_) => serde_json::from_slice::<Wrapper>(&bytes)
+            .map(|wrapper| wrapper.snapshot)
+            .map_err(|error| {
+                format!(
+                    "{} is not a Device Viewer snapshot: {error}",
+                    path.display()
+                )
+            })?,
+    };
+    // A newer schema would otherwise deserialize partially and look like a
+    // machine whose hardware sections are all empty.
+    if snapshot.schema_version > state::SCHEMA_VERSION {
+        return Err(format!(
+            "{} uses schema version {}, but this build understands up to {}; update Device Viewer",
+            path.display(),
+            snapshot.schema_version,
+            state::SCHEMA_VERSION
+        ));
     }
-    serde_json::from_slice::<Wrapper>(&bytes)
-        .map(|wrapper| wrapper.snapshot)
-        .map_err(|error| {
-            format!(
-                "{} is not a Device Viewer snapshot: {error}",
-                path.display()
-            )
-        })
+    Ok(snapshot)
 }
 
-fn format_for(path: &PathBuf) -> ExportFormat {
+/// The extension decides the format, and an unknown one is an error: silently
+/// writing plain text into `report.yaml` produces a file that lies about itself.
+fn format_for(path: &PathBuf) -> Result<ExportFormat, String> {
     match path
         .extension()
         .and_then(|extension| extension.to_str())
         .map(|extension| extension.to_ascii_lowercase())
         .as_deref()
     {
-        Some("json") => ExportFormat::Json,
-        Some("md") | Some("markdown") => ExportFormat::Markdown,
-        _ => ExportFormat::Txt,
+        Some("json") => Ok(ExportFormat::Json),
+        Some("md") | Some("markdown") => Ok(ExportFormat::Markdown),
+        Some("txt") | Some("text") => Ok(ExportFormat::Txt),
+        Some(other) => Err(format!(
+            "cannot choose an output format from extension `{other}`; use .txt, .md or .json"
+        )),
+        None => Err("--out needs a file name with a .txt, .md or .json extension".to_string()),
     }
+}
+
+/// `--only` 不只是裁剪输出：未点名的模块必须在采集阶段就被跳过，
+/// 否则运行一次 `--only cpu` 仍会探测 GPU、SMART 和带宽。
+fn query_options(only: Option<&[String]>) -> QueryOptions {
+    let Some(only) = only else {
+        return QueryOptions::default();
+    };
+    let wants = |name: &str| only.iter().any(|module| module == name);
+    let mut enabled: Vec<&'static str> = Vec::new();
+    for module in device_query::ALL_MODULES {
+        // network 与 audio 由 system 模块统一采集，点它们等于点 system。
+        let needed = wants(module) || (module == "system" && (wants("network") || wants("audio")));
+        if needed {
+            enabled.push(module);
+        }
+    }
+    QueryOptions::with_enabled(enabled)
 }
 
 fn retain_only(snapshot: &mut HardwareSnapshot, only: &[String]) {
@@ -371,4 +456,36 @@ Register-ArgumentCompleter -Native -CommandName device-viewer -ScriptBlock {
         other => return Err(format!("unsupported shell `{other}`; use bash, zsh or powershell")),
     };
     Ok(script)
+}
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn only_limits_the_collected_modules() {
+        let options = query_options(Some(&["cpu".to_string()]));
+        assert!(options.is_enabled("cpu"));
+        assert!(!options.is_enabled("vulkan"));
+        assert!(!options.is_enabled("bandwidth"));
+    }
+
+    #[test]
+    fn network_and_audio_enable_the_system_module() {
+        for name in ["network", "audio"] {
+            let options = query_options(Some(&[name.to_string()]));
+            assert!(
+                options.is_enabled("system"),
+                "{name} must collect system data"
+            );
+            assert!(!options.is_enabled("cpu"));
+        }
+    }
+
+    #[test]
+    fn no_selection_runs_every_module() {
+        let options = query_options(None);
+        for module in device_query::ALL_MODULES {
+            assert!(options.is_enabled(module), "{module} must run by default");
+        }
+    }
 }

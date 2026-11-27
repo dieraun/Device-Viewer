@@ -69,9 +69,11 @@ fn run_benchmark(cancel: &CancellationToken) -> QueryResult<BandwidthInfo> {
         }
 
         let started = Instant::now();
+        // 按 64 位字累加：逐字节循环测的是分支与标量吞吐，不是内存带宽。
         let mut checksum = 0u64;
-        for byte in &source {
-            checksum = checksum.wrapping_add(u64::from(*byte));
+        for chunk in source.chunks_exact(8) {
+            let word = u64::from_le_bytes(chunk.try_into().expect("chunk is 8 bytes"));
+            checksum = checksum.wrapping_add(word);
         }
         std::hint::black_box(checksum);
         let read_elapsed = started.elapsed();

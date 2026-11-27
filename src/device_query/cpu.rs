@@ -32,12 +32,15 @@ pub struct CpuInfo {
 /// Collects CPU data. The sysinfo refresh performs blocking syscalls.
 pub async fn query(cancel: &CancellationToken) -> QueryResult<CpuInfo> {
     run_blocking("cpu", cancel, || {
-        let mut system = System::new_all().map_err(|error| {
+        // 只装 CPU 数据，不用 new_all()：后者顺带枚举全部进程，纯属浪费。
+        let mut system = System::new().map_err(|error| {
             QueryError::backend("cpu", "the operating system refused CPU enumeration")
                 .with_detail(error.to_string())
         })?;
-        // sysinfo needs two samples to compute a meaningful load percentage.
-        std::thread::sleep(std::time::Duration::from_millis(120));
+        system.refresh_cpu_all();
+        // sysinfo 要求两次采样间隔不短于 MINIMUM_CPU_UPDATE_INTERVAL
+        // （当前为 200 ms）；短于它时第二次刷新拿不到差值，占用率会一直是 0。
+        std::thread::sleep(sysinfo::MINIMUM_CPU_UPDATE_INTERVAL);
         system.refresh_cpu_all();
 
         let processors = system.cpus();

@@ -18,7 +18,7 @@
 
 1.5 Device Viewer 默认**不发起网络请求**。导出、复制、保存、对比、查看日志均在本地完成。
 
-1.6 本声明与 [LICENSE](LICENSE)、[LEGAL_STATEMENT.md](LEGAL_STATEMENT.md)、[DISCLAIMER.md](DISCLAIMER.md) 共同适用。
+1.6 本声明与 [LICENSE-MIT](LICENSE-MIT)、[LICENSE-APACHE](LICENSE-APACHE)、[LEGAL_STATEMENT.md](LEGAL_STATEMENT.md)、[DISCLAIMER.md](DISCLAIMER.md) 共同适用。
 
 ---
 
@@ -274,15 +274,13 @@ Device Viewer 在本地读取和处理以下类别的信息，用于界面展示
 
 ## 十七、核心法律条款
 
-本声明受 [LICENSE](LICENSE) 与 [LEGAL_STATEMENT.md](LEGAL_STATEMENT.md) 约束，核心条款如下：
+本声明受所选许可协议（[LICENSE-MIT](LICENSE-MIT) 或 [LICENSE-APACHE](LICENSE-APACHE)）与 [LEGAL_STATEMENT.md](LEGAL_STATEMENT.md) 约束，核心条款如下：
 
-1. 本项目完整著作权归原作者独有。
-2. 个人、非营利组织：可以免费本地使用、学习研究。
-3. 所有盈利组织、商业团队、企业、工作室、付费开发者：禁止使用、复制、修改、衍生、二次开源、二次闭源、二次打包、二次分发、二次发布、商用售卖、集成进商业项目、SaaS、付费工具、课程售卖。所有商业用途必须提前发送邮件 yanruoxinsu2@outlook.com 获取作者书面授权，未经授权全部属于侵权。
-4. 任何个人/组织修改源代码，必须在项目仓库提交 Issue 写明修改内容，不报备视为侵权。
-5. 严禁任何主体修改代码后二次公开、二次发布、二次开源、二次引流售卖。
-6. 一旦查实商业侵权、二次发布、未授权商用、私自魔改分发行为，作者将直接依据《中华人民共和国著作权法》启动完整法律追责流程，包含民事起诉、侵权索赔、下架全部侵权项目、公开追责。
-7. 协议最终解释权归原作者所有；管辖法律：中华人民共和国大陆地区法律。
+1. 本项目著作权由作者与贡献者共同保有，按所选许可协议授权。
+2. 任何使用、复制、修改与分发，须保留版权声明与许可文本，并遵守所选协议条款。
+3. 本项目按"现状"提供，不附带任何明示或默示保证，详见本声明其余条款。
+4. 本项目不上传硬件信息、快照、日志或使用统计；分享快照前请自行脱敏。
+5. 本声明与许可协议不一致的，以许可协议原文为准。
 
 ---
 

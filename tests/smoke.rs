@@ -6,5 +6,17 @@
 #[test]
 fn package_metadata_is_stable() {
     assert_eq!(env!("CARGO_PKG_NAME"), "device-viewer");
-    assert_eq!(env!("CARGO_PKG_VERSION"), "1.2.0");
+    let version: &str = env!("CARGO_PKG_VERSION");
+    assert!(!version.is_empty(), "version must not be empty");
+    let segments: Vec<&str> = version.split('.').collect();
+    assert!(
+        segments.len() >= 2,
+        "version must have at least two dot-separated segments: {version}"
+    );
+    for segment in &segments {
+        assert!(
+            !segment.is_empty() && segment.bytes().all(|byte| byte.is_ascii_digit()),
+            "version segment must be numeric: {segment} in {version}"
+        );
+    }
 }

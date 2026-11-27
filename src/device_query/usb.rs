@@ -164,7 +164,7 @@ mod win {
         DIGCF_PRESENT, GUID_DEVCLASS_USB, SP_DEVINFO_DATA, SPDRP_ADDRESS, SPDRP_BUSNUMBER,
         SPDRP_CLASS, SPDRP_DEVICEDESC, SPDRP_FRIENDLYNAME, SPDRP_HARDWAREID, SPDRP_MFG,
         SPDRP_SERVICE, SetupDiDestroyDeviceInfoList, SetupDiEnumDeviceInfo, SetupDiGetClassDevsW,
-        SetupDiGetDeviceRegistryPropertyW,
+        SetupDiGetDeviceInstanceIdW, SetupDiGetDeviceRegistryPropertyW,
     };
     use windows::core::PCWSTR;
 
@@ -172,6 +172,8 @@ mod win {
 
     impl Drop for DeviceInfoSet {
         fn drop(&mut self) {
+            // SAFETY: 句柄由 SetupDiGetClassDevsW 返回且只被这个 guard 持有，
+            // Drop 只会释放一次。
             unsafe {
                 let _ = SetupDiDestroyDeviceInfoList(self.0);
             }
@@ -179,6 +181,8 @@ mod win {
     }
 
     pub(super) fn enumerate() -> QueryResult<UsbInfo> {
+        // SAFETY: 只按设备类 GUID 查询，参数都是本函数构造的有效值；返回的
+        // 句柄立刻交给 DeviceInfoSet 托管。
         let set = unsafe {
             SetupDiGetClassDevsW(
                 Some(&GUID_DEVCLASS_USB),
@@ -201,6 +205,7 @@ mod win {
                 cbSize: std::mem::size_of::<SP_DEVINFO_DATA>() as u32,
                 ..Default::default()
             };
+            // SAFETY: set 有效，data 是已填好 cbSize 的栈上结构体，由 API 写入。
             if unsafe { SetupDiEnumDeviceInfo(set.0, index, &mut data) }.is_err() {
                 break;
             }
@@ -214,7 +219,11 @@ mod win {
                 .or_else(|| description.clone())
                 .unwrap_or_else(|| "USB device".to_string());
 
-            if name.contains("Root Hub") || name.contains("Host Controller") {
+            // 不能按本地化名称过滤：非英文 Windows 上 "Root Hub" 并不出现。
+            // 设备实例 ID 与驱动服务名是与语言无关的稳定标识。
+            let instance_id = get_instance_id(set.0, &data).unwrap_or_default();
+            let service = get_string(set.0, &data, SPDRP_SERVICE).unwrap_or_default();
+            if is_hub_or_controller(&instance_id, &service) {
                 continue;
             }
 
@@ -234,7 +243,6 @@ mod win {
                 class: get_string(set.0, &data, SPDRP_CLASS).or_else(|| Some("USB".to_string())),
                 speed_mbps: None,
             });
-            let _ = get_string(set.0, &data, SPDRP_SERVICE);
         }
 
         devices.sort_by(|left, right| (left.bus, left.address).cmp(&(right.bus, right.address)));
@@ -250,21 +258,49 @@ mod win {
         data: &SP_DEVINFO_DATA,
         property: windows::Win32::Devices::DeviceAndDriverInstallation::SETUP_DI_REGISTRY_PROPERTY,
     ) -> Option<String> {
-        let mut buffer = [0u8; 2048];
+        // 两趟调用：固定缓冲区遇上长属性（例如多字符串的 SPDRP_HARDWAREID）
+        // 会返回 ERROR_INSUFFICIENT_BUFFER，旧写法 .ok()? 直接丢设备。
+        // 先探所需字节数，再按需分配重试。
+        let mut probe = [0u8; 8];
         let mut required = 0u32;
+        // SAFETY: set/data 来自同一台设备，属性缓冲区是不足 8 字节的探针，
+        // API 只在容量内写入并通过 required 报告真正需要的字节数。
+        match unsafe {
+            SetupDiGetDeviceRegistryPropertyW(
+                set,
+                data,
+                property,
+                None,
+                Some(&mut probe),
+                Some(&mut required),
+            )
+        } {
+            Ok(()) => return decode_utf16(&probe),
+            // 只有“缓冲区不够”才带出 required；其他错误（找不到属性、
+            // 数据类型不符）表示设备没有这个属性。
+            Err(_) if required > 0 => {}
+            Err(_) => return None,
+        }
+
+        let mut buffer = vec![0u8; required as usize];
+        let mut used = 0u32;
+        // SAFETY: 缓冲区刚好是探针报告的长度，API 最多写这么多字节。
         unsafe {
             SetupDiGetDeviceRegistryPropertyW(
                 set,
                 data,
                 property,
                 None,
-                Some(&mut buffer),
-                Some(&mut required),
+                Some(buffer.as_mut_slice()),
+                Some(&mut used),
             )
             .ok()?;
         }
+        decode_utf16(&buffer)
+    }
 
-        let words: Vec<u16> = buffer
+    fn decode_utf16(bytes: &[u8]) -> Option<String> {
+        let words: Vec<u16> = bytes
             .chunks_exact(2)
             .map(|pair| u16::from_le_bytes([pair[0], pair[1]]))
             .take_while(|word| *word != 0)
@@ -276,6 +312,53 @@ mod win {
         }
     }
 
+    fn get_instance_id(
+        set: windows::Win32::Devices::DeviceAndDriverInstallation::HDEVINFO,
+        data: &SP_DEVINFO_DATA,
+    ) -> Option<String> {
+        let mut probe = [0u16; 128];
+        let mut required = 0u32;
+        // SAFETY: 同上，先把 128 个 wchar 的探针交给 API，超长时只读取
+        // required 报告的长度。
+        match unsafe {
+            SetupDiGetDeviceInstanceIdW(set, data, Some(&mut probe), Some(&mut required))
+        } {
+            Ok(()) => return trim_utf16(&probe),
+            Err(_) if required > 0 => {}
+            Err(_) => return None,
+        }
+        let mut buffer = vec![0u16; required as usize];
+        let mut used = 0u32;
+        // SAFETY: 缓冲区按 required 分配，API 不会写入超出该长度的内容。
+        unsafe {
+            SetupDiGetDeviceInstanceIdW(set, data, Some(buffer.as_mut_slice()), Some(&mut used))
+                .ok()?;
+        }
+        trim_utf16(&buffer)
+    }
+
+    fn trim_utf16(words: &[u16]) -> Option<String> {
+        let end = words
+            .iter()
+            .position(|word| *word == 0)
+            .unwrap_or(words.len());
+        if end == 0 {
+            None
+        } else {
+            Some(String::from_utf16_lossy(&words[..end]))
+        }
+    }
+
+    /// Root hubs live under `USB\\ROOT_HUB*` and host controllers are driven
+    /// by the `USB*HCI` services; both are language-independent markers.
+    fn is_hub_or_controller(instance_id: &str, service: &str) -> bool {
+        let root_hub = instance_id.to_ascii_uppercase().contains("ROOT_HUB");
+        let controller = ["USBXHCI", "USBEHCI", "USBOHCI", "USBUHCI"]
+            .iter()
+            .any(|known| service.eq_ignore_ascii_case(known));
+        root_hub || controller
+    }
+
     fn get_u32(
         set: windows::Win32::Devices::DeviceAndDriverInstallation::HDEVINFO,
         data: &SP_DEVINFO_DATA,
@@ -283,6 +366,7 @@ mod win {
     ) -> Option<u32> {
         let mut buffer = [0u8; 4];
         let mut required = 0u32;
+        // SAFETY: 4 字节缓冲区足够放下 SPDRP_* 的 DWORD 值，API 只在容量内写。
         unsafe {
             SetupDiGetDeviceRegistryPropertyW(
                 set,

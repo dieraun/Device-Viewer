@@ -49,6 +49,8 @@ mod win {
     };
 
     pub(super) fn enumerate() -> QueryResult<DirectXInfo> {
+        // SAFETY: CreateDXGIFactory1 无参数，返回 COM 接口指针并按 HRESULT
+        // 报告失败；windows crate 负责把失败折成 Result。
         let factory: IDXGIFactory1 = unsafe { CreateDXGIFactory1() }.map_err(|error| {
             QueryError::backend("directx", "cannot create DXGI factory")
                 .with_detail(error.to_string())
@@ -58,6 +60,7 @@ mod win {
         let mut warnings = Vec::new();
 
         for index in 0..64u32 {
+            // SAFETY: factory 是本函数新建的有效 COM 对象，调用期间一直存活。
             match unsafe { factory.EnumAdapters1(index) } {
                 Ok(adapter) => match unsafe { adapter.GetDesc1() } {
                     Ok(desc) => {

@@ -8,7 +8,6 @@ use crate::state::AppState;
 use crate::ui::widgets;
 
 pub fn show(ui: &mut egui::Ui, state: &mut AppState, i18n: I18n) {
-    widgets::page_header(ui, i18n, "nav.opengl", "page.opengl.sub");
     let Some(info) = state.snapshot.opengl.clone() else {
         widgets::empty(ui, i18n.t("overview.no_data"));
         return;
@@ -95,14 +94,9 @@ pub fn show(ui: &mut egui::Ui, state: &mut AppState, i18n: I18n) {
                 markdown_table(&[i18n.t("common.extensions")], &rows),
             );
         });
-        egui::ScrollArea::vertical()
-            .max_height(260.0)
-            .auto_shrink([false, false])
-            .show(ui, |ui| {
-                for extension in &info.extensions {
-                    ui.monospace(extension);
-                }
-            });
+        for extension in &info.extensions {
+            ui.monospace(extension);
+        }
     });
 
     widgets::warnings(ui, i18n, "opengl-warnings", &info.warnings);

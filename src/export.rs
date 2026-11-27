@@ -164,7 +164,7 @@ fn render_markdown(snapshot: &HardwareSnapshot, i18n: I18n, units: UnitSystem) -
     }
 
     if let Some(memory) = &snapshot.memory {
-        let _ = writeln!(output, "## {}\n", i18n.t("nav.overview"));
+        let _ = writeln!(output, "## {}\n", i18n.t("common.memory"));
         let rows = vec![
             vec![
                 i18n.t("common.total").to_string(),
@@ -183,7 +183,7 @@ fn render_markdown(snapshot: &HardwareSnapshot, i18n: I18n, units: UnitSystem) -
                 format_bytes(memory.available_bytes, units),
             ],
             vec![
-                "Swap".to_string(),
+                i18n.t("common.swap").to_string(),
                 format!(
                     "{} / {}",
                     format_bytes(memory.swap_used_bytes, units),
@@ -276,7 +276,7 @@ fn render_markdown(snapshot: &HardwareSnapshot, i18n: I18n, units: UnitSystem) -
         output.push_str(&markdown_table(
             &[
                 i18n.t("common.address"),
-                "VID:PID",
+                i18n.t("common.vid_pid"),
                 i18n.t("common.name"),
                 i18n.t("common.class"),
                 i18n.t("common.driver"),
@@ -318,7 +318,7 @@ fn render_markdown(snapshot: &HardwareSnapshot, i18n: I18n, units: UnitSystem) -
         output.push_str(&markdown_table(
             &[
                 i18n.t("common.device"),
-                "VID:PID",
+                i18n.t("common.vid_pid"),
                 i18n.t("common.type"),
                 "API",
                 i18n.t("common.memory"),
@@ -341,7 +341,7 @@ fn render_markdown(snapshot: &HardwareSnapshot, i18n: I18n, units: UnitSystem) -
                 opengl.vendor.clone().unwrap_or_else(|| "-".to_string()),
             ],
             vec![
-                "Renderer".to_string(),
+                i18n.t("common.renderer").to_string(),
                 opengl.renderer.clone().unwrap_or_else(|| "-".to_string()),
             ],
             vec![
@@ -466,7 +466,7 @@ fn render_markdown(snapshot: &HardwareSnapshot, i18n: I18n, units: UnitSystem) -
             &[
                 i18n.t("usb.bus"),
                 i18n.t("usb.port"),
-                "VID:PID",
+                i18n.t("common.vid_pid"),
                 i18n.t("usb.product"),
                 i18n.t("common.class"),
                 i18n.t("common.speed"),
@@ -666,7 +666,7 @@ fn render_markdown(snapshot: &HardwareSnapshot, i18n: I18n, units: UnitSystem) -
         output.push_str(&markdown_table(
             &[
                 i18n.t("common.name"),
-                "VID:PID",
+                i18n.t("common.vid_pid"),
                 i18n.t("common.dedicated"),
                 i18n.t("common.shared"),
                 i18n.t("common.software"),
@@ -693,8 +693,8 @@ fn render_markdown(snapshot: &HardwareSnapshot, i18n: I18n, units: UnitSystem) -
         output.push_str(&markdown_table(
             &[
                 i18n.t("common.name"),
-                "Registry ID",
-                "Unified memory",
+                i18n.t("common.registry_id"),
+                i18n.t("metal.unified"),
                 i18n.t("common.max"),
             ],
             &rows,
@@ -937,6 +937,61 @@ fn yes_no(value: bool, i18n: I18n) -> &'static str {
     }
 }
 
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn markdown_tables_keep_escaped_pipes_inside_one_cell() {
+        let markdown = "| 设备 | 说明 |\n| --- | --- |\n| A\\|B | two |\n";
+        assert_eq!(markdown_to_text(markdown), "设备\t说明\nA|B\ttwo\n");
+    }
+
+    #[test]
+    fn markdown_headings_lose_their_markers() {
+        assert_eq!(markdown_to_text("## 概览\n"), "概览\n");
+    }
+
+    #[test]
+    fn text_tables_flatten_newlines_and_keep_cjk() {
+        let table = markdown_table(
+            &["设备", "备注"],
+            &[vec!["A|B".to_string(), "第一行\n第二行".to_string()]],
+        );
+        assert_eq!(markdown_to_text(&table), "设备\t备注\nA|B\t第一行 第二行\n");
+    }
+
+    #[test]
+    fn txt_export_has_no_markdown_markers() {
+        let snapshot = HardwareSnapshot::default();
+        let i18n = I18n::new(crate::i18n::Language::Chinese);
+        let text = render(&snapshot, ExportFormat::Txt, i18n, UnitSystem::Binary);
+        assert!(!text.contains('|'), "table pipes leaked into txt: {text}");
+        assert!(
+            !text.lines().any(|line| line.trim_start().starts_with('#')),
+            "heading markers leaked into txt: {text}"
+        );
+        assert!(text.contains(i18n.t("app.title")));
+    }
+
+    #[test]
+    fn json_export_round_trips_through_the_snapshot_parser() {
+        let mut snapshot = HardwareSnapshot::default();
+        snapshot.captured_at_unix_ms = 42;
+        snapshot.elapsed_ms = 7;
+        let json = render(
+            &snapshot,
+            ExportFormat::Json,
+            I18n::new(crate::i18n::Language::English),
+            UnitSystem::Binary,
+        );
+        let decoded: HardwareSnapshot = serde_json::from_str(&json).expect("json round trip");
+        assert_eq!(decoded.schema_version, snapshot.schema_version);
+        assert_eq!(decoded.captured_at_unix_ms, 42);
+        assert_eq!(decoded.elapsed_ms, 7);
+    }
+}
+/// Converts exported Markdown into a tab separated plain text table.
 fn markdown_to_text(markdown: &str) -> String {
     let mut output = String::new();
     for line in markdown.lines() {
@@ -945,10 +1000,13 @@ fn markdown_to_text(markdown: &str) -> String {
             continue;
         }
         if trimmed.starts_with('|') {
-            let cells: Vec<&str> = trimmed
+            // escape_cell 把单元格内的 | 转义成 \|；先换成占位符再按未转义
+            // 的竖线切分，否则含 | 的设备名会被拆成错位的多列。
+            let protected = trimmed.replace("\\|", "\u{0}");
+            let cells: Vec<String> = protected
                 .trim_matches('|')
                 .split('|')
-                .map(str::trim)
+                .map(|cell| cell.trim().replace('\u{0}', "|"))
                 .collect();
             output.push_str(&cells.join("\t"));
             output.push('\n');

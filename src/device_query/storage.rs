@@ -18,6 +18,10 @@ pub struct StorageHealth {
     pub power_on_hours: Option<u64>,
     pub power_cycle_count: Option<u64>,
     pub total_written_bytes: Option<u64>,
+    /// True when `total_written_bytes` comes from the SMART 241 heuristic
+    /// rather than a protocol with a defined unit; the UI shows it as "≈".
+    #[serde(default)]
+    pub written_bytes_estimated: bool,
     pub bad_blocks: Option<u64>,
     pub percentage_used: Option<u8>,
     pub media_errors: Option<u64>,
@@ -156,17 +160,34 @@ fn apply_smart(device: &mut StorageDevice, smart: &smartctl_rs::device::SmartOut
                 .iter()
                 .find(|attribute| attribute.id == 241)
                 .and_then(|attribute| attribute.raw.value.checked_mul(512));
+            // 241 的原始值是厂商自定义计数，512 字节只是常见单位；部分 SSD
+            // 按 32 MiB 计数，所以这里只能给出估算值，UI 上以“约”标注。
+            if health.total_written_bytes.is_some() {
+                health.written_bytes_estimated = true;
+                device.warnings.push(
+                    "total written bytes is estimated from SMART attribute 241; \
+                     the vendor unit may differ (for example 32 MiB per count)"
+                        .to_string(),
+                );
+            }
         }
         if health.temperature_c.is_none() {
+            // 194 的 raw 是打包值（低字节温度 + 高字节厂商数据），
+            // 直接取整个 u64 会得到荒谬的温度。
             health.temperature_c = attributes
                 .table
                 .iter()
                 .find(|attribute| attribute.id == 194)
-                .map(|attribute| attribute.raw.value as f64);
+                .map(|attribute| temperature_from_raw(attribute.raw.value));
         }
     }
 
     device.health = Some(health);
+}
+
+/// 194 的 raw 高字节是厂商数据，只有低 8 位是摄氏温度。
+fn temperature_from_raw(value: u64) -> f64 {
+    (value & 0xFF) as f64
 }
 
 fn non_empty(value: String) -> Option<String> {
@@ -174,5 +195,15 @@ fn non_empty(value: String) -> Option<String> {
         None
     } else {
         Some(value)
+    }
+}
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn temperature_ignores_the_vendor_high_byte() {
+        assert_eq!(temperature_from_raw(0x01F4_0023), 35.0);
+        assert_eq!(temperature_from_raw(35), 35.0);
     }
 }

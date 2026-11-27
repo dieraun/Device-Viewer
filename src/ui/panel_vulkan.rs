@@ -1,15 +1,15 @@
 //! Vulkan adapters, memory heaps and live GPU telemetry.
 
-use egui::{Color32, RichText};
+use egui::RichText;
 
 use crate::device_query::format_bytes;
 use crate::export::markdown_table;
 use crate::i18n::I18n;
 use crate::state::AppState;
+use crate::ui::theme;
 use crate::ui::widgets;
 
 pub fn show(ui: &mut egui::Ui, state: &mut AppState, i18n: I18n) {
-    widgets::page_header(ui, i18n, "nav.vulkan", "page.vulkan.sub");
     let Some(info) = state.snapshot.vulkan.clone() else {
         let response = widgets::badge_response(
             ui,
@@ -122,32 +122,41 @@ pub fn show(ui: &mut egui::Ui, state: &mut AppState, i18n: I18n) {
             .iter()
             .map(|sample| sample.vram_percent)
             .collect();
-        ui.columns(2, |columns| {
-            widgets::card(&mut columns[0], |ui| {
-                ui.label(RichText::new(i18n.t("gpu.utilization")).strong());
-                widgets::sparkline(
-                    ui,
-                    i18n.t("gpu.history"),
-                    &utilization_history,
-                    100.0,
-                    Color32::from_rgb(90, 200, 255),
-                    120.0,
-                );
-            });
-            widgets::card(&mut columns[1], |ui| {
-                ui.label(RichText::new(i18n.t("gpu.vram")).strong());
-                widgets::sparkline(
-                    ui,
-                    i18n.t("gpu.history"),
-                    &vram_history,
-                    100.0,
-                    Color32::from_rgb(255, 170, 90),
-                    120.0,
-                );
-            });
-        });
+        widgets::two_pane(
+            ui,
+            |ui| {
+                widgets::card(ui, |ui| {
+                    ui.label(RichText::new(i18n.t("gpu.utilization")).strong());
+                    widgets::sparkline(
+                        ui,
+                        "gpu-utilization-spark",
+                        &utilization_history,
+                        100.0,
+                        widgets::SparkKind::Utilization,
+                        120.0,
+                    );
+                });
+            },
+            |ui| {
+                widgets::card(ui, |ui| {
+                    ui.label(RichText::new(i18n.t("gpu.vram")).strong());
+                    widgets::sparkline(
+                        ui,
+                        "gpu-vram-spark",
+                        &vram_history,
+                        100.0,
+                        widgets::SparkKind::Memory,
+                        120.0,
+                    );
+                });
+            },
+        );
         if state.gpu_runtime.is_empty() {
-            ui.label(RichText::new(i18n.t("gpu.no_runtime")).weak().size(11.0));
+            ui.label(
+                RichText::new(i18n.t("gpu.no_runtime"))
+                    .weak()
+                    .size(theme::FONT_CAPTION),
+            );
         }
 
         ui.add_space(8.0);
@@ -229,42 +238,37 @@ pub fn show(ui: &mut egui::Ui, state: &mut AppState, i18n: I18n) {
                 i18n,
                 markdown_table(&[i18n.t("common.extensions")], &rows),
             );
-            egui::ScrollArea::vertical()
-                .max_height(240.0)
-                .auto_shrink([false, false])
-                .show(ui, |ui| {
-                    for extension in extensions {
-                        if !filter.is_empty() && !extension.to_lowercase().contains(&filter) {
-                            continue;
+            for extension in extensions {
+                if !filter.is_empty() && !extension.to_lowercase().contains(&filter) {
+                    continue;
+                }
+                let favorite = state
+                    .settings
+                    .favorite_extensions
+                    .iter()
+                    .any(|item| item == &extension);
+                ui.horizontal(|ui| {
+                    let icon = if favorite {
+                        theme::Icon::Check
+                    } else {
+                        theme::Icon::Plus
+                    };
+                    if widgets::icon_button(ui, icon, i18n.t("gpu.favorite")).clicked() {
+                        if favorite {
+                            state
+                                .settings
+                                .favorite_extensions
+                                .retain(|item| item != &extension);
+                            state.ui.notify(i18n.t("gpu.favorite_removed"));
+                        } else {
+                            state.settings.favorite_extensions.push(extension.clone());
+                            state.ui.notify(i18n.t("gpu.favorite_added"));
                         }
-                        let favorite = state
-                            .settings
-                            .favorite_extensions
-                            .iter()
-                            .any(|item| item == &extension);
-                        ui.horizontal(|ui| {
-                            if ui
-                                .button(if favorite { "★" } else { "☆" })
-                                .on_hover_text(i18n.t("gpu.favorite"))
-                                .clicked()
-                            {
-                                if favorite {
-                                    state
-                                        .settings
-                                        .favorite_extensions
-                                        .retain(|item| item != &extension);
-                                    state.ui.toast =
-                                        Some(i18n.t("gpu.favorite_removed").to_string());
-                                } else {
-                                    state.settings.favorite_extensions.push(extension.clone());
-                                    state.ui.toast = Some(i18n.t("gpu.favorite_added").to_string());
-                                }
-                                state.mark_dirty();
-                            }
-                            ui.monospace(extension);
-                        });
+                        state.mark_dirty();
                     }
+                    ui.monospace(extension);
                 });
+            }
         });
     }
 

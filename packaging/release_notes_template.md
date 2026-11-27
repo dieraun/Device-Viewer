@@ -9,7 +9,7 @@
 1. 将 {{VERSION}}、{{RELEASE_DATE}}、{{COMMIT_SHA}}、{{RUN_ID}} 替换为实际值。
 2. 填写“本次亮点”“变更内容”“已知问题”“校验和”。
 3. 不要在本文件或发布说明中写入任何 token、API Key、证书、私钥、Apple ID 密码。
-4. 发布前确认所有归档都包含 LICENSE、LEGAL_STATEMENT.md、PRIVACY.md、DISCLAIMER.md。
+4. 发布前确认所有归档都包含 LICENSE-MIT、LICENSE-APACHE、LEGAL_STATEMENT.md、PRIVACY.md、DISCLAIMER.md。
 -->
 
 ## 本次亮点
@@ -24,11 +24,11 @@
 | 平台 | 架构 | 文件 | SHA-256 |
 | --- | --- | --- | --- |
 | Windows | x86_64 | `DeviceViewer-windows-x86_64-{{VERSION}}.zip` | `{{SHA256_WINDOWS}}` |
-| macOS | x86_64 | `DeviceViewer-macos-x86_64-{{VERSION}}.zip` | `{{SHA256_MACOS_X86_64}}` |
-| macOS | aarch64 | `DeviceViewer-macos-aarch64-{{VERSION}}.zip` | `{{SHA256_MACOS_AARCH64}}` |
+| macOS | x86_64 | `DeviceViewer-macos-x86_64-{{VERSION}}.tar.gz` | `{{SHA256_MACOS_X86_64}}` |
+| macOS | aarch64（可选） | `DeviceViewer-macos-aarch64-{{VERSION}}.tar.gz` | `{{SHA256_MACOS_AARCH64}}` |
 | Linux | x86_64 (musl) | `DeviceViewer-linux-x86_64-{{VERSION}}.tar.gz` | `{{SHA256_LINUX}}` |
 
-每个压缩包内均包含 `README_PACKAGE.md`、`LICENSE`、`LEGAL_STATEMENT.md`、`PRIVACY.md` 与 `DISCLAIMER.md`。
+每个压缩包内均包含 `README_PACKAGE.md`、`LICENSE-MIT`、`LICENSE-APACHE`、`LEGAL_STATEMENT.md`、`PRIVACY.md`、`DISCLAIMER.md` 与 `THIRD_PARTY_NOTICES.md`。
 
 ## 安装与运行
 
@@ -41,7 +41,7 @@
 
 ### macOS
 
-1. 解压对应架构的 zip。
+1. 解压对应的 `tar.gz`。
 2. 首次启动如被 Gatekeeper 拦截，请在“系统设置 → 隐私与安全性”中允许，或在确认校验和后执行 `xattr -dr com.apple.quarantine DeviceViewer`。
 3. 本版本默认未签名、未公证；正式分发前请由维护者使用自己的 Apple Developer ID 完成签名与公证。
 4. 需要 SMART 时请自行安装 `smartctl` 并以 `sudo` 运行。
@@ -106,15 +106,12 @@ Windows 可使用 `Get-FileHash -Algorithm SHA256`，macOS/Linux 可使用 `shas
 
 ## 法律与隐私
 
-- 项目完整著作权归原作者独有。
-- 个人、非营利组织可免费本地使用、学习研究。
-- 盈利组织、商业团队、企业、工作室、付费开发者未经书面授权，禁止使用、复制、修改、衍生、二次开源、二次闭源、二次打包、二次分发、二次发布、商用售卖、集成进商业项目、SaaS、付费工具、课程售卖。
-- 商业授权：**yanruoxinsu2@outlook.com**。
-- 修改源代码必须在项目仓库提交 Issue 报备；禁止修改后二次公开、二次发布、二次开源、二次引流售卖。
-- 完整条款：[LICENSE](../LICENSE)、[LEGAL_STATEMENT.md](../LEGAL_STATEMENT.md)、[PRIVACY.md](../PRIVACY.md)、[DISCLAIMER.md](../DISCLAIMER.md)。
+- 本项目采用 MIT OR Apache-2.0 双许可，是 OSI 认可的开源软件，使用者可任选其一。
+- 著作权归属、商标与第三方组件说明见 [LEGAL_STATEMENT.md](../LEGAL_STATEMENT.md)。
+- 完整条款：[LICENSE-MIT](../LICENSE-MIT)、[LICENSE-APACHE](../LICENSE-APACHE)、[PRIVACY.md](../PRIVACY.md)、[DISCLAIMER.md](../DISCLAIMER.md)。
 
 程序纯本地运行，不上传硬件信息、快照、日志或使用统计。分享快照前请检查其中可能包含的主机名、序列号、MAC 地址与 IP 地址。
 
 ---
 
-Copyright © {{YEAR}} Device Viewer 原作者。保留所有权利。
+Copyright © {{YEAR}} Device Viewer authors. Licensed under MIT OR Apache-2.0.

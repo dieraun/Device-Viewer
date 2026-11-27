@@ -6,9 +6,9 @@ Rust · eframe/egui · 异步并行采集 · GUI + CLI · Windows / Linux / macO
 
 [🇨🇳 中文](#中文) · [🇬🇧 English](#english)
 
-**当前版本 Current release: 1.2.0** · [发行说明 Release notes](RELEASE_NOTES_1.2.0.md)
+**当前版本 Current release: 1.3.0** · [发行说明 Release notes](RELEASE_NOTES_1.3.0.md)
 
-> 本项目采用**定制化专有许可协议**，不是开源软件。个人与非营利组织可免费本地使用；任何商业用途必须事先获得作者书面授权。详见 [LICENSE](LICENSE) 与 [LEGAL_STATEMENT.md](LEGAL_STATEMENT.md)。
+> 本项目采用 **MIT OR Apache-2.0 双许可**，是 OSI 认可的开源软件。你可以任选其一使用、修改、分发，包括商业用途与闭源集成；只需保留版权声明与许可文本。详见 [LICENSE-MIT](LICENSE-MIT) 与 [LICENSE-APACHE](LICENSE-APACHE)。
 
 ---
 
@@ -26,7 +26,7 @@ Rust · eframe/egui · 异步并行采集 · GUI + CLI · Windows / Linux / macO
 - [特性开关](#特性开关)
 - [测试与质量](#测试与质量)
 - [数据与隐私](#数据与隐私)
-- [许可证与商业授权](#许可证与商业授权)
+- [许可证](#许可证)
 - [免责声明](#免责声明)
 - [联系](#联系)
 
@@ -136,7 +136,7 @@ Rust · eframe/egui · 异步并行采集 · GUI + CLI · Windows / Linux / macO
 
 **环境要求**
 
-- Rust 1.95 或更高版本（edition 2024）。
+- Rust 1.100 或更高版本（edition 2024）。
 - 常规 C/C++ 构建工具与系统图形开发库。
 - 可选：`smartctl`（更完整的存储健康信息）、`nvidia-smi`（NVIDIA 温度）。
 - 可选：Vulkan Loader、OpenCL ICD、OpenVX SDK，取决于启用的特性。
@@ -248,19 +248,14 @@ cargo test --no-default-features
 - 快照可能包含主机名、序列号、MAC 地址、IP 地址等设备标识，分享前请自行审查。
 - 详细说明见 [PRIVACY.md](PRIVACY.md)。
 
-### 许可证与商业授权
+### 许可证
 
-本项目采用**定制化专有许可协议**，不是 MIT、Apache-2.0、GPL、BSD 或任何 OSI 认可的开源许可证。
+本项目采用 **MIT OR Apache-2.0 双许可**，是 OSI 认可的开源软件，使用者可任选其一：
 
-1. 本项目完整著作权归原作者独有。
-2. 个人、非营利组织：可以免费本地使用、学习研究。
-3. 所有盈利组织、商业团队、企业、工作室、付费开发者：禁止使用、复制、修改、衍生、二次开源、二次闭源、二次打包、二次分发、二次发布、商用售卖、集成进商业项目、SaaS、付费工具、课程售卖。所有商业用途必须提前发送邮件至 **yanruoxinsu2@outlook.com** 获取作者书面授权，未经授权全部属于侵权。
-4. 任何个人/组织修改源代码，必须在项目仓库提交 Issue 写明修改内容，不报备视为侵权。
-5. 严禁任何主体修改代码后二次公开、二次发布、二次开源、二次引流售卖。
-6. 一旦查实商业侵权、二次发布、未授权商用、私自魔改分发行为，作者将直接依据《中华人民共和国著作权法》启动完整法律追责流程，包含民事起诉、侵权索赔、下架全部侵权项目、公开追责。
-7. 协议最终解释权归原作者所有；管辖法律：中华人民共和国大陆地区法律。
+- [LICENSE-MIT](LICENSE-MIT) — MIT License
+- [LICENSE-APACHE](LICENSE-APACHE) — Apache License 2.0
 
-完整条款以 [LICENSE](LICENSE) 为准；法律边界、侵权后果与维权方式见 [LEGAL_STATEMENT.md](LEGAL_STATEMENT.md)。
+许可授予以所选协议原文为准；著作权归属、商标与第三方组件说明见 [LEGAL_STATEMENT.md](LEGAL_STATEMENT.md)。
 
 ### 免责声明
 
@@ -268,8 +263,8 @@ cargo test --no-default-features
 
 ### 联系
 
-- 商业授权：**yanruoxinsu2@outlook.com**
-- 修改报备：请在项目仓库提交 Issue，写明修改目的、范围、文件与行为变化。
+- 问题反馈：项目 Issue
+- 安全漏洞：请私下邮件 yanruoxinsu2@outlook.com
 
 ---
 
@@ -287,7 +282,7 @@ cargo test --no-default-features
 - [Feature Flags](#feature-flags)
 - [Testing](#testing)
 - [Privacy](#privacy)
-- [License and Commercial Licensing](#license-and-commercial-licensing)
+- [License](#license)
 - [Disclaimer](#disclaimer)
 - [Contact](#contact)
 
@@ -376,7 +371,7 @@ Field coverage differs by platform. SMART requires `smartctl`, NVIDIA temperatur
 
 ### Quick Start
 
-Requirements: Rust 1.95+ (edition 2024), standard C/C++ build tools, and the platform graphics development libraries. Optional: `smartctl`, `nvidia-smi`, Vulkan Loader, OpenCL ICD, OpenVX SDK.
+Requirements: Rust 1.100+ (edition 2024), standard C/C++ build tools, and the platform graphics development libraries. Optional: `smartctl`, `nvidia-smi`, Vulkan Loader, OpenCL ICD, OpenVX SDK.
 
 ```bash
 # GUI
@@ -459,19 +454,20 @@ Coverage includes unit formatting, error severity, serialization round-trips, pe
 
 No network requests, no telemetry, no account system. Configuration, snapshots, and logs stay on the local machine; portable mode stores them beside the executable. Snapshots may contain hostnames, serial numbers, MAC addresses, and IP addresses — review them before sharing. See [PRIVACY.md](PRIVACY.md).
 
-### License and Commercial Licensing
+### License
 
-This is a **custom proprietary, source-available license**, not MIT, Apache-2.0, GPL, BSD, or any OSI-approved open-source license.
+Licensed under either of
 
-1. Copyright in the complete project belongs exclusively to the original author.
-2. Individuals and non-profit organizations may use it locally for free, for learning and research.
-3. **All for-profit organizations, commercial teams, enterprises, studios, and paid developers are prohibited** from using, copying, modifying, creating derivatives from, re-open-sourcing, re-closing, repackaging, redistributing, republishing, selling, integrating into commercial projects, offering as SaaS, shipping in paid tools, or selling in courses. All commercial use requires prior written authorization by emailing **yanruoxinsu2@outlook.com**. Unauthorized use is infringement.
-4. Any person or organization modifying the source must open an Issue in the project repository describing the changes. Failure to report is infringement.
-5. No entity may publicly republish, re-release, re-open-source, or use modified code for paid traffic after modification.
-6. Verified commercial infringement, unauthorized redistribution, or unauthorized modified distribution will lead to a full legal process under the Copyright Law of the People's Republic of China, including civil litigation, damages, takedown of infringing projects, and public accountability.
-7. Final interpretation rests with the original author; governing law is the law of mainland China.
+- Apache License, Version 2.0 ([LICENSE-APACHE](LICENSE-APACHE) or http://www.apache.org/licenses/LICENSE-2.0)
+- MIT License ([LICENSE-MIT](LICENSE-MIT) or http://opensource.org/licenses/MIT)
 
-The complete terms are in [LICENSE](LICENSE); legal boundaries and enforcement are detailed in [LEGAL_STATEMENT.md](LEGAL_STATEMENT.md).
+at your option.
+
+#### Contribution
+
+Unless you explicitly state otherwise, any contribution intentionally submitted
+for inclusion in the work by you, as defined in the Apache-2.0 license, shall be
+dual licensed as above, without any additional terms or conditions.
 
 ### Disclaimer
 
@@ -479,9 +475,9 @@ Provided “as is”, without warranty that hardware information, SMART data, se
 
 ### Contact
 
-- Commercial licensing: **yanruoxinsu2@outlook.com**
-- Modification notice: open an Issue in the project repository with the purpose, scope, affected files, and behavioral changes.
+- Bug reports: project Issues
+- Security vulnerabilities: email yanruoxinsu2@outlook.com privately
 
 ---
 
-Copyright © 2026 Device Viewer 原作者. All rights reserved.
+Copyright © 2026 Device Viewer authors. Licensed under MIT OR Apache-2.0.

@@ -16,6 +16,13 @@ use std::time::{SystemTime, UNIX_EPOCH};
 fn main() {
     println!("cargo:rerun-if-changed=build.rs");
     println!("cargo:rerun-if-changed=.git/HEAD");
+    // `.git/HEAD` usually only holds "ref: refs/heads/<branch>" and does not
+    // change when a commit is made, so the revision it points at has to be
+    // watched as well; otherwise `DV_BUILD_COMMIT` stays at the value from the
+    // last time some other watched input moved.
+    if let Some(reference) = head_reference() {
+        println!("cargo:rerun-if-changed={reference}");
+    }
     println!("cargo:rerun-if-env-changed=DV_BUILD_COMMIT");
     println!("cargo:rerun-if-env-changed=SOURCE_DATE_EPOCH");
     println!("cargo:rerun-if-env-changed=RUSTC");
@@ -60,6 +67,17 @@ fn env_value(name: &str) -> Option<String> {
         .ok()
         .map(|value| sanitize(&value))
         .filter(|value| !value.is_empty())
+}
+
+/// Path of the ref that `.git/HEAD` points at, relative to the package root.
+fn head_reference() -> Option<String> {
+    let head = std::fs::read_to_string(".git/HEAD").ok()?;
+    let target = head.trim().strip_prefix("ref: ")?.trim();
+    if target.is_empty() {
+        None
+    } else {
+        Some(format!(".git/{target}"))
+    }
 }
 
 fn git_revision() -> Option<String> {

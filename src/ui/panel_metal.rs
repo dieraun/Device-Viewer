@@ -5,10 +5,10 @@ use egui::RichText;
 use crate::device_query::format_bytes;
 use crate::i18n::I18n;
 use crate::state::AppState;
+use crate::ui::theme;
 use crate::ui::widgets;
 
 pub fn show(ui: &mut egui::Ui, state: &mut AppState, i18n: I18n) {
-    widgets::page_header(ui, i18n, "nav.metal", "page.metal.sub");
     let Some(info) = state.snapshot.metal.clone() else {
         widgets::empty(ui, i18n.t("overview.no_data"));
         return;
@@ -23,7 +23,7 @@ pub fn show(ui: &mut egui::Ui, state: &mut AppState, i18n: I18n) {
     for (index, device) in info.devices.iter().enumerate() {
         widgets::card(ui, |ui| {
             ui.horizontal(|ui| {
-                ui.label(RichText::new(&device.name).size(16.0).strong());
+                ui.label(RichText::new(&device.name).size(theme::FONT_H2).strong());
                 if device.unified_memory {
                     widgets::badge(ui, i18n.t("metal.unified"), widgets::BadgeKind::Ok);
                 }

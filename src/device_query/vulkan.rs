@@ -79,15 +79,49 @@ pub async fn query(cancel: &CancellationToken) -> QueryResult<VulkanInfo> {
 fn query_sync() -> QueryResult<VulkanInfo> {
     use ash::vk;
 
+    // SAFETY: 这个调用只加载 Vulkan loader 动态库，不接触任何外部指针，
+    // 失败会以 Result::Err 返回。
     let entry = unsafe { ash::Entry::load() }.map_err(|error| {
         super::QueryError::backend("vulkan", "Vulkan loader is not available")
             .with_detail(error.to_string())
     })?;
 
+    // SAFETY: entry 在文件作用域内一直存活，调用本身只读取 loader 版本，没有
+    // 指针参数。
     let loader_version = unsafe { entry.try_enumerate_instance_version() }
         .ok()
         .flatten();
     let instance_api = loader_version.unwrap_or(vk::API_VERSION_1_0);
+
+    let mut warnings = Vec::new();
+    let mut enabled_extensions: Vec<*const std::ffi::c_char> = Vec::new();
+    let mut create_flags = vk::InstanceCreateFlags::empty();
+    #[cfg(target_os = "macos")]
+    {
+        // MoltenVK 只有通过 portability 扩展才枚举得到设备。启用前必须先确认
+        // loader 确实暴露了该扩展，否则 create_instance 会直接失败
+        // （VK_ERROR_EXTENSION_NOT_PRESENT）。
+        // SAFETY: 传入 None 是 1.0 loader 的合法写法，返回的列表由 ash 持有，
+        // 不借用调用方的内存。
+        let supported = unsafe { entry.enumerate_instance_extension_properties(None) }
+            .map(|list| {
+                list.iter().any(|extension| {
+                    extension
+                        .extension_name_as_c_str()
+                        .is_ok_and(|name| name == c"VK_KHR_portability_enumeration")
+                })
+            })
+            .unwrap_or(false);
+        if supported {
+            enabled_extensions.push(c"VK_KHR_portability_enumeration".as_ptr());
+            create_flags |= vk::InstanceCreateFlags::from_raw(0x0000_0001);
+        } else {
+            warnings.push(
+                "VK_KHR_portability_enumeration is missing; MoltenVK devices may not be enumerated"
+                    .to_string(),
+            );
+        }
+    }
 
     let app_info = vk::ApplicationInfo::default()
         .application_name(c"Device Viewer")
@@ -95,7 +129,12 @@ fn query_sync() -> QueryResult<VulkanInfo> {
         .engine_name(c"Device Viewer")
         .engine_version(1)
         .api_version(instance_api);
-    let create_info = vk::InstanceCreateInfo::default().application_info(&app_info);
+    let create_info = vk::InstanceCreateInfo::default()
+        .application_info(&app_info)
+        .flags(create_flags)
+        .enabled_extension_names(&enabled_extensions);
+    // SAFETY: create_info 与 enabled_extensions 都活到调用结束；分配器回调
+    // 传 None 使用默认实现，返回的实例由下面的 guard 负责销毁。
     let instance = unsafe { entry.create_instance(&create_info, None) }.map_err(|error| {
         super::QueryError::backend("vulkan", "could not create a Vulkan instance")
             .with_detail(error.to_string())
@@ -104,21 +143,26 @@ fn query_sync() -> QueryResult<VulkanInfo> {
     struct InstanceGuard(ash::Instance);
     impl Drop for InstanceGuard {
         fn drop(&mut self) {
+            // SAFETY: guard 独占这个实例，Drop 只会执行一次，且此时不再有
+            // 指向实例内部资源的引用。
             unsafe { self.0.destroy_instance(None) };
         }
     }
     let guard = InstanceGuard(instance);
     let instance = &guard.0;
 
+    // SAFETY: instance 由 guard 保证有效，枚举结果由 ash 持有。
     let physical_devices = unsafe { instance.enumerate_physical_devices() }.map_err(|error| {
         super::QueryError::backend("vulkan", "could not enumerate Vulkan adapters")
             .with_detail(error.to_string())
     })?;
 
     let mut devices = Vec::with_capacity(physical_devices.len());
-    let mut warnings = Vec::new();
+    let mut device_api_max = 0u32;
 
     for physical_device in physical_devices {
+        // SAFETY: physical_device 来自同一实例的枚举结果，调用期间实例有效；
+        // 三个查询都只写返回到 ash 拥有的结构体。
         let properties = unsafe { instance.get_physical_device_properties(physical_device) };
         let memory = unsafe { instance.get_physical_device_memory_properties(physical_device) };
         let extensions = unsafe { instance.enumerate_device_extension_properties(physical_device) }
@@ -156,11 +200,15 @@ fn query_sync() -> QueryResult<VulkanInfo> {
             .sum();
 
         let mut used_memory_bytes = None;
-        if budget_supported && instance_api >= vk::API_VERSION_1_1 {
+        // vkGetPhysicalDeviceMemoryProperties2 需要实例与设备都达到 1.1；
+        // 只按 loader 版本判断会在 1.0 设备上调用不存在的入口。
+        if budget_supported && instance_api.min(properties.api_version) >= vk::API_VERSION_1_1 {
             let mut budget = vk::PhysicalDeviceMemoryBudgetPropertiesEXT::default();
             {
                 let mut properties2 =
                     vk::PhysicalDeviceMemoryProperties2::default().push_next(&mut budget);
+                // SAFETY: properties2 通过 push_next 挂着 budget，整个调用期间
+                // 两者都在栈上；已确认实例与设备都支持 1.1 入口点。
                 unsafe {
                     instance
                         .get_physical_device_memory_properties2(physical_device, &mut properties2);
@@ -186,6 +234,7 @@ fn query_sync() -> QueryResult<VulkanInfo> {
         };
 
         let api_version = properties.api_version;
+        device_api_max = device_api_max.max(api_version);
         let driver_version = properties.driver_version;
 
         devices.push(VulkanDevice {
@@ -220,11 +269,13 @@ fn query_sync() -> QueryResult<VulkanInfo> {
         warnings.push("Vulkan loader found no physical devices".to_string());
     }
 
-    let version_text = loader_version.map(format_vulkan_version);
+    // 这里报告实例实际协商到的版本（loader 与设备版本取小），
+    // 而不是把 loader 版本直接当成 Vulkan API 版本。
+    let negotiated = device_api_max.min(instance_api);
     Ok(VulkanInfo {
         available: true,
-        loader_version: version_text.clone(),
-        api_version: version_text,
+        loader_version: loader_version.map(format_vulkan_version),
+        api_version: (device_api_max > 0).then(|| format_vulkan_version(negotiated)),
         devices,
         warnings,
     })

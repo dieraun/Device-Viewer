@@ -7,7 +7,6 @@ use crate::state::AppState;
 use crate::ui::widgets;
 
 pub fn show(ui: &mut egui::Ui, state: &mut AppState, i18n: I18n) {
-    widgets::page_header(ui, i18n, "nav.openvx", "page.openvx.sub");
     let Some(info) = state.snapshot.openvx.clone() else {
         widgets::empty(ui, i18n.t("overview.no_data"));
         return;
