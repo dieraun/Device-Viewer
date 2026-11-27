@@ -187,16 +187,20 @@ jobs:
   build-macos:
     name: macOS ${{ matrix.arch }}
     needs: metadata
-    runs-on: macos-14
+    # macos-14 标签当前会以「configuration 'macos-14-arm64-us-default' is not
+    # supported」秒失败（2026-11-27 用 runner-probe 工作流实测），因此改用
+    # macos-15-intel（原生 x86_64）。
+    runs-on: ${{ matrix.os }}
     strategy:
       fail-fast: false
       matrix:
         include:
           - arch: x86_64
+            os: macos-15-intel
             target: x86_64-apple-darwin
-          # macOS aarch64 默认不开启：macos-14 runner 为 arm64，交叉产出
-          # x86_64 已在上方；aarch64 仅作为可选构建，需要时取消下面两行注释。
+          # macOS aarch64 默认不开启：需要时取消下面三行注释（macos-15 为 arm64）。
           # - arch: aarch64
+          #   os: macos-15
           #   target: aarch64-apple-darwin
     env:
       VERSION: ${{ needs.metadata.outputs.version }}
