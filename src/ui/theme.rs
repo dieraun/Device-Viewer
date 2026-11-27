@@ -287,6 +287,25 @@ pub enum Icon {
 }
 
 /// Draw an icon centred in rect with a 1.6 px stroke.
+/// 画一圈从中心向外淡出的柔光，启动页的品牌块用它垫底。
+pub fn paint_glow(painter: &egui::Painter, center: egui::Pos2, radius: f32, color: egui::Color32) {
+    let segments = 48_u32;
+    let mut mesh = egui::Mesh::default();
+    mesh.colored_vertex(center, color.gamma_multiply(0.28));
+    for step in 0..=segments {
+        let angle = step as f32 / segments as f32 * std::f32::consts::TAU;
+        mesh.colored_vertex(
+            center + egui::vec2(angle.cos(), angle.sin()) * radius,
+            egui::Color32::TRANSPARENT,
+        );
+    }
+    for step in 1..=segments {
+        mesh.add_triangle(0, step, step + 1);
+    }
+    painter.add(egui::Shape::mesh(mesh));
+}
+
+/// 画一条线宽 1.6 px 的矢量图标。
 pub fn paint_icon(painter: &egui::Painter, rect: Rect, icon: Icon, color: Color32) {
     let stroke = Stroke::new(1.6, color);
     let side = rect.width().min(rect.height());

@@ -84,6 +84,8 @@ pub struct DeviceViewerApp {
     palette_open: bool,
     palette_query: String,
     palette_selection: usize,
+    /// 打开面板的那一帧要把焦点交给输入框，否则 Ctrl+K 之后还得再点一下才能打字。
+    palette_focus: bool,
     export_format: ExportFormat,
     export_preview: String,
     startup_error: Option<String>,
@@ -141,6 +143,7 @@ impl DeviceViewerApp {
             palette_open: false,
             palette_query: String::new(),
             palette_selection: 0,
+            palette_focus: false,
             export_format: ExportFormat::Markdown,
             export_preview: String::new(),
             startup_error: None,
@@ -440,11 +443,15 @@ impl DeviceViewerApp {
             .resizable(false)
             .frame(t.overlay_frame())
             .show(ctx, |ui| {
-                ui.add(
+                let query_edit = ui.add(
                     egui::TextEdit::singleline(&mut self.palette_query)
                         .hint_text(self.i18n.t("shell.palette_hint"))
                         .desired_width(f32::INFINITY),
                 );
+                if self.palette_focus {
+                    query_edit.request_focus();
+                    self.palette_focus = false;
+                }
                 let query = self.palette_query.to_lowercase();
                 let mut items: Vec<(PaletteAction, String)> = Vec::new();
                 for section in ui::sidebar::SECTIONS {
@@ -576,73 +583,167 @@ impl DeviceViewerApp {
         });
     }
 
-    /// 启动采集期间的骨架屏：三列灰块占位，配合真实进度条。
+    /// 启动采集期间的欢迎页：品牌标识、骨架卡片和一条真实进度。
+    ///
+    /// 整块内容在窗口里居中；骨架块的假文字行带一点呼吸感，让"正在读取"
+    /// 看起来是在工作，而不是卡住的空窗口。
     fn loading_page(&mut self, ui: &mut egui::Ui) {
         let t = ui::theme::theme(ui);
         egui::CentralPanel::default()
-            .frame(
-                egui::Frame::new()
-                    .fill(t.canvas)
-                    .inner_margin(egui::Margin::same(theme::SPACE_8 as i8)),
-            )
+            .frame(egui::Frame::new().fill(t.canvas))
             .show(ui, |ui| {
-                ui.vertical_centered(|ui| {
-                    ui.add_space((ui.available_height() * 0.12).max(24.0));
-                    ui.label(
-                        egui::RichText::new("Device Viewer")
-                            .size(theme::FONT_DISPLAY)
-                            .strong()
-                            .color(t.text_primary),
-                    );
-                    ui.add_space(theme::SPACE_1);
-                    ui.label(
-                        egui::RichText::new(self.i18n.t("loading.reading"))
-                            .size(theme::FONT_CAPTION)
-                            .color(t.text_secondary),
-                    );
-                    ui.add_space(theme::SPACE_6);
-                    ui.horizontal(|ui| {
-                        ui.add_space((ui.available_width() * 0.12).max(0.0));
-                        for _ in 0..3 {
-                            let (rect, _) = ui.allocate_exact_size(
-                                egui::Vec2::new(220.0, 96.0),
-                                egui::Sense::hover(),
-                            );
+                let width = ui.available_width().min(560.0);
+                let pad_x = ((ui.available_width() - width) / 2.0).max(0.0);
+                let pad_y = ((ui.available_height() - 372.0) / 2.0).max(24.0);
+                let pulse = 0.55 + 0.15 * (ui.input(|input| input.time) * 2.2).sin() as f32;
+                ui.add_space(pad_y);
+                ui.horizontal(|ui| {
+                    ui.add_space(pad_x);
+                    ui.vertical(|ui| {
+                        ui.set_width(width);
+                        ui.vertical_centered(|ui| {
+                            let (tile, _) = ui
+                                .allocate_exact_size(egui::Vec2::splat(64.0), egui::Sense::hover());
+                            // 一圈柔光，让品牌块不像是贴在纯色背景上的方块。
+                            theme::paint_glow(ui.painter(), tile.center(), 200.0, t.accent);
                             ui.painter().rect_filled(
-                                rect,
-                                egui::CornerRadius::same(theme::RADIUS_CARD),
-                                t.raised,
+                                tile,
+                                egui::CornerRadius::same(18),
+                                t.accent_subtle,
                             );
+                            theme::paint_icon(
+                                ui.painter(),
+                                egui::Rect::from_center_size(
+                                    tile.center(),
+                                    egui::Vec2::splat(30.0),
+                                ),
+                                theme::Icon::Hardware,
+                                t.accent,
+                            );
+
                             ui.add_space(theme::SPACE_4);
-                        }
+                            ui.label(
+                                egui::RichText::new("Device Viewer")
+                                    .size(theme::FONT_DISPLAY)
+                                    .strong()
+                                    .color(t.text_primary),
+                            );
+                            ui.add_space(theme::SPACE_1);
+                            ui.label(
+                                egui::RichText::new(format!(
+                                    "v{} · MIT OR Apache-2.0",
+                                    env!("CARGO_PKG_VERSION")
+                                ))
+                                .size(theme::FONT_CAPTION)
+                                .color(t.text_tertiary),
+                            );
+
+                            ui.add_space(theme::SPACE_6);
+                            ui.horizontal(|ui| {
+                                ui.add(egui::Spinner::new().size(14.0).color(t.accent));
+                                ui.label(
+                                    egui::RichText::new(self.i18n.t("loading.reading"))
+                                        .size(theme::FONT_BODY)
+                                        .color(t.text_secondary),
+                                );
+                            });
+
+                            ui.add_space(theme::SPACE_6);
+                            let gap = theme::SPACE_3;
+                            let card = ((width - gap * 2.0) / 3.0).max(80.0);
+                            ui.horizontal(|ui| {
+                                for index in 0..3 {
+                                    let (rect, _) = ui.allocate_exact_size(
+                                        egui::Vec2::new(card, 84.0),
+                                        egui::Sense::hover(),
+                                    );
+                                    let painter = ui.painter().clone();
+                                    painter.rect_filled(
+                                        rect,
+                                        egui::CornerRadius::same(theme::RADIUS_CARD),
+                                        t.raised,
+                                    );
+                                    painter.rect_stroke(
+                                        rect,
+                                        egui::CornerRadius::same(theme::RADIUS_CARD),
+                                        egui::Stroke::new(theme::BORDER_WIDTH, t.border_subtle),
+                                        egui::StrokeKind::Inside,
+                                    );
+                                    painter.rect_filled(
+                                        egui::Rect::from_min_size(
+                                            egui::pos2(rect.left() + 14.0, rect.top() + 18.0),
+                                            egui::Vec2::new(card * 0.42, 7.0),
+                                        ),
+                                        egui::CornerRadius::same(3),
+                                        t.border_strong,
+                                    );
+                                    painter.rect_filled(
+                                        egui::Rect::from_min_size(
+                                            egui::pos2(rect.left() + 14.0, rect.top() + 36.0),
+                                            egui::Vec2::new(card * 0.72, 6.0),
+                                        ),
+                                        egui::CornerRadius::same(3),
+                                        t.border_subtle.gamma_multiply(pulse),
+                                    );
+                                    painter.rect_filled(
+                                        egui::Rect::from_min_size(
+                                            egui::pos2(rect.left() + 14.0, rect.top() + 50.0),
+                                            egui::Vec2::new(card * 0.55, 6.0),
+                                        ),
+                                        egui::CornerRadius::same(3),
+                                        t.border_subtle.gamma_multiply(pulse),
+                                    );
+                                    if index < 2 {
+                                        ui.add_space(gap);
+                                    }
+                                }
+                            });
+
+                            ui.add_space(theme::SPACE_8);
+                            let progress = (self.started.elapsed().as_secs_f32()
+                                / DEFAULT_MODULE_TIMEOUT.as_secs_f32())
+                            .mul_add(0.95, 0.0)
+                            .clamp(0.0, 0.95);
+                            ui.horizontal(|ui| {
+                                ui.add(
+                                    egui::ProgressBar::new(progress)
+                                        .desired_width(width - 52.0)
+                                        .desired_height(6.0)
+                                        .corner_radius(egui::CornerRadius::same(3))
+                                        .fill(t.accent),
+                                );
+                                ui.with_layout(
+                                    egui::Layout::right_to_left(egui::Align::Center),
+                                    |ui| {
+                                        ui.label(
+                                            egui::RichText::new(format!(
+                                                "{:.0}%",
+                                                progress * 100.0
+                                            ))
+                                            .size(theme::FONT_CAPTION)
+                                            .color(t.text_secondary),
+                                        );
+                                    },
+                                );
+                            });
+                            ui.add_space(theme::SPACE_1);
+                            ui.label(
+                                egui::RichText::new(self.i18n.t("loading.hint"))
+                                    .size(theme::FONT_CAPTION)
+                                    .color(t.text_tertiary),
+                            );
+                            if let Some(error) = &self.startup_error {
+                                ui.add_space(theme::SPACE_3);
+                                ui.label(
+                                    egui::RichText::new(error)
+                                        .size(theme::FONT_BODY)
+                                        .color(t.err),
+                                );
+                            }
+                        });
                     });
-                    ui.add_space(theme::SPACE_6);
-                    let progress = (self.started.elapsed().as_secs_f32()
-                        / DEFAULT_MODULE_TIMEOUT.as_secs_f32())
-                    .mul_add(0.95, 0.0)
-                    .clamp(0.0, 0.95);
-                    ui.add(
-                        egui::ProgressBar::new(progress)
-                            .desired_width(430.0)
-                            .desired_height(8.0)
-                            .corner_radius(egui::CornerRadius::same(theme::RADIUS_CONTROL))
-                            .fill(t.accent),
-                    );
-                    ui.add_space(theme::SPACE_3);
-                    ui.label(
-                        egui::RichText::new(self.i18n.t("loading.hint"))
-                            .size(theme::FONT_CAPTION)
-                            .color(t.text_tertiary),
-                    );
-                    if let Some(error) = &self.startup_error {
-                        ui.add_space(theme::SPACE_3);
-                        ui.label(
-                            egui::RichText::new(error)
-                                .size(theme::FONT_BODY)
-                                .color(t.err),
-                        );
-                    }
                 });
+                ui.ctx().request_repaint();
             });
     }
 
@@ -710,33 +811,45 @@ impl DeviceViewerApp {
         egui::Panel::top("permission-banner")
             .frame(
                 egui::Frame::new()
-                    .fill(t.raised)
+                    .fill(t.canvas)
                     .inner_margin(egui::Margin::symmetric(
                         theme::SPACE_6 as i8,
                         theme::SPACE_2 as i8,
-                    ))
-                    .stroke(egui::Stroke::new(theme::BORDER_WIDTH, t.border_subtle)),
+                    )),
             )
             .show(ui, |ui| {
-                ui.horizontal_wrapped(|ui| {
-                    ui::theme::icon_widget(ui, theme::Icon::Warning, 16.0);
+                ui.horizontal(|ui| {
+                    // 左侧 3 px 警示条 + 图标，避免整段黄字像报错横幅。
+                    let (bar, _) =
+                        ui.allocate_exact_size(egui::Vec2::new(3.0, 16.0), egui::Sense::hover());
+                    ui.painter()
+                        .rect_filled(bar, egui::CornerRadius::same(2), t.warn);
+                    ui.add_space(theme::SPACE_2);
+                    ui::theme::icon_widget(ui, theme::Icon::Warning, 14.0);
                     ui.label(
                         egui::RichText::new(self.i18n.t("permission.standard_hint"))
                             .size(theme::FONT_CAPTION)
-                            .color(t.warn),
+                            .strong()
+                            .color(t.text_primary),
                     );
                     if !self.state.permission.items.is_empty() {
                         ui.label(
-                            egui::RichText::new(self.state.permission.items.join(" · "))
+                            egui::RichText::new(self.state.permission.items.join("  ·  "))
                                 .size(theme::FONT_CAPTION)
-                                .color(t.text_secondary),
+                                .color(t.text_tertiary),
                         );
                     }
-                    if ui::widgets::icon_button(ui, theme::Icon::Close, self.i18n.t("app.close"))
+                    ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+                        if ui::widgets::icon_button(
+                            ui,
+                            theme::Icon::Close,
+                            self.i18n.t("app.close"),
+                        )
                         .clicked()
-                    {
-                        self.state.ui.permission_notice_open = false;
-                    }
+                        {
+                            self.state.ui.permission_notice_open = false;
+                        }
+                    });
                 });
             });
     }
@@ -899,6 +1012,8 @@ impl eframe::App for DeviceViewerApp {
         if palette_shortcut {
             self.palette_open = true;
             self.palette_selection = 0;
+            self.palette_query.clear();
+            self.palette_focus = true;
         }
         if escape {
             self.more_open = false;

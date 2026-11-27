@@ -78,7 +78,10 @@ pub fn show(ui: &mut egui::Ui, state: &mut AppState, i18n: I18n) {
                 .strong(),
             );
             ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-                if ui.button(i18n.t("snapshot.choose")).clicked() {
+                if ui
+                    .add(widgets::secondary_button(i18n.t("snapshot.choose")))
+                    .clicked()
+                {
                     state.settings.page = crate::state::Page::Snapshots;
                 }
             });
@@ -91,8 +94,8 @@ pub fn show(ui: &mut egui::Ui, state: &mut AppState, i18n: I18n) {
             t,
             theme::Icon::Snapshot,
             i18n.t("compare.no_baseline"),
-            i18n.t("snapshot.choose"),
-            None,
+            i18n.t("compare.no_baseline_hint"),
+            Some(i18n.t("snapshot.choose")),
         );
         return;
     };

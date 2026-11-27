@@ -108,7 +108,15 @@ pub fn card_response<R>(
     ui: &mut egui::Ui,
     add: impl FnOnce(&mut egui::Ui) -> R,
 ) -> egui::InnerResponse<R> {
-    theme::theme(ui).card_frame().show(ui, add)
+    theme::theme(ui).card_frame().show(ui, |ui| {
+        // 卡片默认按内容收缩：在单列布局里会缩成一小块，右侧留白。
+        // 这里让卡片至少占满父容器给它的宽度，页面才会是整列对齐。
+        let width = ui.available_width();
+        if width.is_finite() {
+            ui.set_min_width(width);
+        }
+        add(ui)
+    })
 }
 
 pub fn collapsible(
@@ -816,9 +824,22 @@ pub fn columns(ui: &egui::Ui) -> usize {
 /// A responsive row of metrics. Cards are not involved: a metric is a block of
 /// text, so it sits directly on the canvas.
 pub fn metric_grid(ui: &mut egui::Ui, metrics: &[(&str, String, Option<String>)]) {
-    let cols = columns(ui);
+    if metrics.is_empty() {
+        return;
+    }
     let spacing = theme::SPACE_6;
-    let cell = ((ui.available_width() - spacing * (cols as f32 - 1.0)) / cols as f32).max(120.0);
+    let width = ui.available_width();
+    // 指标数量固定（一般为 4 个），列数要按"放得下几个"来定，
+    // 否则 4 个指标在 3 列断点会把最后一个挤到下一行。
+    let mut cols = 1;
+    for candidate in (1..=metrics.len().min(4)).rev() {
+        let cell = (width - spacing * (candidate as f32 - 1.0)) / candidate as f32;
+        if cell >= 200.0 {
+            cols = candidate;
+            break;
+        }
+    }
+    let cell = ((width - spacing * (cols as f32 - 1.0)) / cols as f32).max(120.0);
     egui::Grid::new("metric-grid")
         .num_columns(cols)
         .spacing([spacing, theme::SPACE_4])
@@ -828,6 +849,9 @@ pub fn metric_grid(ui: &mut egui::Ui, metrics: &[(&str, String, Option<String>)]
                     Vec2::new(cell, 0.0),
                     Layout::top_down(Align::Min),
                     |ui| {
+                        // 子 Ui 必须自己撑满格宽，否则 Grid 会按内容收缩，
+                        // 四个指标就会一个比一个靠左。
+                        ui.set_min_width(cell);
                         metric(ui, label, value.clone(), detail.clone());
                     },
                 );
@@ -838,53 +862,41 @@ pub fn metric_grid(ui: &mut egui::Ui, metrics: &[(&str, String, Option<String>)]
         });
 }
 
-/// The page level warning summary: a collapsible strip with the count, the
-/// short reasons listed on expansion. Per panel warnings stay quiet.
-pub fn warning_summary(ui: &mut egui::Ui, i18n: I18n, id: &str, failures: &[(String, String)]) {
-    if failures.is_empty() {
+/// 页面级警告入口：贴在页签行右端，点开是明细。
+///
+/// 之前是一整条横跨页面宽度的横幅，和居中的单列表单列错开，看上去
+/// 像是布局没对齐；收进页签行后，页面只剩一条竖直的内容轴。
+pub fn warnings_chip(ui: &mut egui::Ui, i18n: I18n, failures: &[(String, String)], total: usize) {
+    if total == 0 {
         return;
     }
     let t = theme::theme(ui);
-    egui::Frame::new()
-        .fill(t.raised)
-        .corner_radius(egui::CornerRadius::same(theme::RADIUS_CONTROL))
-        .inner_margin(egui::Margin::symmetric(
-            theme::SPACE_3 as i8,
-            theme::SPACE_2 as i8,
-        ))
-        .show(ui, |ui| {
-            collapsible(
-                ui,
-                id,
-                RichText::new(format!(
-                    "{} ({})",
-                    i18n.t("warnings.summary"),
-                    failures.len()
-                ))
-                .size(theme::FONT_CAPTION)
-                .color(t.text_secondary),
-                false,
-                |ui| {
-                    for (module, message) in failures {
-                        ui.horizontal_top(|ui| {
-                            let (bar, _) = ui.allocate_exact_size(
-                                Vec2::new(3.0, theme::FONT_CAPTION + 4.0),
-                                Sense::hover(),
-                            );
-                            ui.painter()
-                                .rect_filled(bar, egui::CornerRadius::same(1), t.warn);
-                            ui.add_space(theme::SPACE_2);
-                            ui.label(
-                                RichText::new(format!("{module} · {message}"))
-                                    .size(theme::FONT_CAPTION)
-                                    .color(t.text_secondary),
-                            );
-                        });
-                        ui.add_space(theme::SPACE_1);
-                    }
-                },
-            );
-        });
+    let title = RichText::new(format!("{} ({total})", i18n.t("warnings.summary")))
+        .size(theme::FONT_CAPTION)
+        .color(t.warn);
+    if failures.is_empty() {
+        ui.label(title);
+        return;
+    }
+    ui.menu_button(title, |ui| {
+        ui.set_min_width(420.0);
+        ui.set_max_width(560.0);
+        for (module, message) in failures {
+            ui.horizontal_top(|ui| {
+                let (bar, _) = ui
+                    .allocate_exact_size(Vec2::new(3.0, theme::FONT_CAPTION + 4.0), Sense::hover());
+                ui.painter()
+                    .rect_filled(bar, egui::CornerRadius::same(1), t.warn);
+                ui.add_space(theme::SPACE_2);
+                ui.label(
+                    RichText::new(format!("{module} · {message}"))
+                        .size(theme::FONT_CAPTION)
+                        .color(t.text_secondary),
+                );
+            });
+            ui.add_space(theme::SPACE_1);
+        }
+    });
 }
 
 /// A metric: caption label, numeral value, caption detail.

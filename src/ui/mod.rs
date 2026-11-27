@@ -32,19 +32,27 @@ use crate::state::{AppState, Page};
 pub fn show_page(ui: &mut egui::Ui, state: &mut AppState, i18n: I18n) {
     // 标题由顶栏吸顶显示；这里只画当前分区的页签，再画唯一的一层滚动。
     let section = sidebar::section_of(state.settings.page);
-    if section.pages.len() > 1
-        && let Some(page) = widgets::tabs(ui, i18n, section.pages, state.settings.page)
-    {
-        state.settings.page = page;
-        state.mark_dirty();
-    }
     let failures: Vec<(String, String)> = state
         .snapshot
         .failures
         .iter()
         .map(|failure| (failure.module.to_string(), failure.message.clone()))
         .collect();
-    widgets::warning_summary(ui, i18n, "page-warnings", &failures);
+    let total_warnings = state.total_warnings();
+    let mut selected = None;
+    ui.horizontal(|ui| {
+        if section.pages.len() > 1 {
+            selected = widgets::tabs(ui, i18n, section.pages, state.settings.page);
+        }
+        ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+            widgets::warnings_chip(ui, i18n, &failures, total_warnings);
+        });
+    });
+    if let Some(page) = selected {
+        state.settings.page = page;
+        state.mark_dirty();
+    }
+    ui.add_space(theme::SPACE_2);
     egui::ScrollArea::vertical()
         .id_salt("page-scroll")
         .auto_shrink([false, false])

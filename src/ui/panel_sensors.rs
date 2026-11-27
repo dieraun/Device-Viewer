@@ -5,6 +5,7 @@ use egui::RichText;
 use crate::export::markdown_table;
 use crate::i18n::I18n;
 use crate::state::AppState;
+use crate::ui::theme;
 use crate::ui::widgets;
 
 pub fn show(ui: &mut egui::Ui, state: &mut AppState, i18n: I18n) {
@@ -13,20 +14,24 @@ pub fn show(ui: &mut egui::Ui, state: &mut AppState, i18n: I18n) {
         return;
     };
 
-    ui.horizontal_wrapped(|ui| {
-        widgets::metric(
-            ui,
-            i18n.t("common.sensors"),
-            format!(
-                "{} / {} / {}",
-                info.temperatures.len(),
-                info.fans.len(),
-                info.voltages.len()
+    // 三类传感器各给一个指标，比单个 "0 / 0 / 0" 更易读。
+    widgets::metric_grid(
+        ui,
+        &[
+            (
+                i18n.t("sensors.temperatures"),
+                info.temperatures.len().to_string(),
+                None,
             ),
-            None,
-        );
-    });
-    ui.add_space(8.0);
+            (i18n.t("sensors.fans"), info.fans.len().to_string(), None),
+            (
+                i18n.t("sensors.voltages"),
+                info.voltages.len().to_string(),
+                None,
+            ),
+        ],
+    );
+    ui.add_space(theme::SPACE_4);
 
     widgets::card(ui, |ui| {
         ui.horizontal(|ui| {
@@ -67,6 +72,14 @@ pub fn show(ui: &mut egui::Ui, state: &mut AppState, i18n: I18n) {
                 ),
             );
         });
+        if info.temperatures.is_empty() {
+            ui.label(
+                RichText::new(i18n.t("app.none"))
+                    .size(theme::FONT_CAPTION)
+                    .color(theme::theme(ui).text_tertiary),
+            );
+            return;
+        }
         let rows: Vec<widgets::Row> = info
             .temperatures
             .iter()

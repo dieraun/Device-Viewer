@@ -136,35 +136,15 @@ pub fn show(ui: &mut egui::Ui, state: &mut AppState, i18n: I18n) {
     ui.add_space(theme::SPACE_3);
 
     let warnings = state.total_warnings();
-    ui.with_layout(Layout::bottom_up(Align::LEFT), |ui| {
-        ui.add_space(theme::SPACE_2);
-        ui.separator();
-        ui.add_space(theme::SPACE_2);
-        if collapsed {
-            ui.vertical_centered(|ui| {
-                status_dot(ui, &t, warnings, i18n);
-            });
-        } else {
-            ui.horizontal(|ui| {
-                ui.label(
-                    RichText::new(format!(
-                        "{} {}",
-                        i18n.t("app.version"),
-                        env!("CARGO_PKG_VERSION")
-                    ))
-                    .size(theme::FONT_CAPTION)
-                    .color(t.text_tertiary),
-                );
-                ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
-                    status_dot(ui, &t, warnings, i18n);
-                });
-            });
-        }
-        ui.add_space(theme::SPACE_2);
-    });
 
+    // 页脚占固定高度，导航列表只吃剩下的空间。之前用 bottom_up 布局把
+    // 剩余高度整个吃掉，滚动区拿到 0 高度，六个分区一个都没画出来。
+    let footer_height = 56.0;
+    let nav_height = (ui.available_height() - footer_height).max(0.0);
     egui::ScrollArea::vertical()
         .id_salt("sidebar-scroll")
+        .max_height(nav_height)
+        .auto_shrink([false, false])
         .show(ui, |ui| {
             for section in &SECTIONS {
                 let selected = section.title_key == current;
@@ -184,6 +164,31 @@ pub fn show(ui: &mut egui::Ui, state: &mut AppState, i18n: I18n) {
                 ui.add_space(theme::SPACE_1);
             }
         });
+
+    ui.add_space(theme::SPACE_2);
+    ui.separator();
+    ui.add_space(theme::SPACE_2);
+    if collapsed {
+        ui.vertical_centered(|ui| {
+            status_dot(ui, &t, warnings, i18n);
+        });
+    } else {
+        ui.horizontal(|ui| {
+            ui.label(
+                RichText::new(format!(
+                    "{} {}",
+                    i18n.t("app.version"),
+                    env!("CARGO_PKG_VERSION")
+                ))
+                .size(theme::FONT_CAPTION)
+                .color(t.text_tertiary),
+            );
+            ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
+                status_dot(ui, &t, warnings, i18n);
+            });
+        });
+    }
+    ui.add_space(theme::SPACE_2);
 }
 
 /// The single place that reports the number of warnings: a coloured dot plus

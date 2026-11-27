@@ -354,6 +354,8 @@ pub struct UiState {
     pub snapshot_menu: Option<String>,
     /// 行菜单弹出的屏幕坐标，菜单跨帧保持打开时需要复用。
     pub snapshot_menu_pos: Option<egui::Pos2>,
+    /// 选中查看详情的 PCI 设备地址；双击表格行设置。
+    pub pcie_detail: Option<String>,
     /// Transient notifications, oldest first.
     pub toasts: Vec<Toast>,
     pub request_update_check: bool,
@@ -378,6 +380,7 @@ impl Default for UiState {
             pending_delete: None,
             snapshot_menu: None,
             snapshot_menu_pos: None,
+            pcie_detail: None,
             toasts: Vec::new(),
             request_update_check: false,
         }

@@ -132,14 +132,31 @@ fn core_column(
     let bar_left = id_width + theme::SPACE_2;
     let bar_width = (width - bar_left - usage_width - frequency_width - theme::SPACE_3).max(20.0);
 
-    ui.label(
-        RichText::new(format!(
-            "#    {}    {}",
-            i18n.t("common.usage"),
-            i18n.t("common.frequency")
-        ))
-        .size(theme::FONT_CAPTION)
-        .color(t.text_tertiary),
+    let (header, _) = ui.allocate_exact_size(Vec2::new(width, 20.0), Sense::hover());
+    let caption = egui::FontId::monospace(theme::FONT_CAPTION);
+    ui.painter().text(
+        egui::pos2(header.left(), header.center().y),
+        Align2::LEFT_CENTER,
+        "#",
+        caption.clone(),
+        t.text_tertiary,
+    );
+    ui.painter().text(
+        egui::pos2(
+            header.right() - frequency_width - theme::SPACE_3,
+            header.center().y,
+        ),
+        Align2::RIGHT_CENTER,
+        i18n.t("common.usage"),
+        caption.clone(),
+        t.text_tertiary,
+    );
+    ui.painter().text(
+        egui::pos2(header.right(), header.center().y),
+        Align2::RIGHT_CENTER,
+        i18n.t("common.frequency"),
+        caption,
+        t.text_tertiary,
     );
     for core in cores {
         let (rect, _) = ui.allocate_exact_size(Vec2::new(width, 24.0), Sense::hover());
