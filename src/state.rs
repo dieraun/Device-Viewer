@@ -1399,7 +1399,14 @@ mod tests {
         );
         assert!(snapshot_path_in(directory, "../capture.dvsnap").is_none());
         assert!(snapshot_path_in(directory, "nested/capture.dvsnap").is_none());
-        assert!(snapshot_path_in(directory, r"..\capture.dvsnap").is_none());
+        // `\` is only a separator on Windows; on Unix it is an ordinary file
+        // name character, so the path must still resolve inside the directory.
+        let backslash = snapshot_path_in(directory, r"..\capture.dvsnap");
+        if cfg!(windows) {
+            assert!(backslash.is_none());
+        } else {
+            assert!(backslash.is_some_and(|path| path.starts_with(directory)));
+        }
         assert!(snapshot_path_in(directory, "").is_none());
     }
 
