@@ -401,7 +401,8 @@ mod linux {
     }
 
     fn parse_edid_name(edid: &[u8]) -> Option<String> {
-        if edid.len() < 128 || &edid[0..8] != [0x00, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0x00] {
+        const HEADER: [u8; 8] = [0x00, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0x00];
+        if edid.len() < 128 || edid[0..8] != HEADER {
             return None;
         }
         for index in 0..4 {
