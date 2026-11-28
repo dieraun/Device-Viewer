@@ -3,7 +3,9 @@
 use serde::{Deserialize, Serialize};
 use tokio_util::sync::CancellationToken;
 
-use super::error::{QueryError, QueryResult};
+#[cfg(windows)]
+use super::error::QueryError;
+use super::error::QueryResult;
 
 #[derive(Debug, Clone, Serialize, Deserialize, Default)]
 pub struct DirectXAdapter {
