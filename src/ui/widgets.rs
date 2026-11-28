@@ -866,33 +866,47 @@ pub fn metric_grid(ui: &mut egui::Ui, metrics: &[(&str, String, Option<String>)]
 ///
 /// 之前是一整条横跨页面宽度的横幅，和居中的单列表单列错开，看上去
 /// 像是布局没对齐；收进页签行后，页面只剩一条竖直的内容轴。
-pub fn warnings_chip(ui: &mut egui::Ui, i18n: I18n, failures: &[(String, String)], total: usize) {
-    if total == 0 {
+pub fn warnings_chip(ui: &mut egui::Ui, i18n: I18n, diagnostics: &[crate::state::Diagnostic]) {
+    if diagnostics.is_empty() {
         return;
     }
     let t = theme::theme(ui);
-    let title = RichText::new(format!("{} ({total})", i18n.t("warnings.summary")))
-        .size(theme::FONT_CAPTION)
-        .color(t.warn);
-    if failures.is_empty() {
-        ui.label(title);
-        return;
-    }
+    let title = RichText::new(format!(
+        "{} ({})",
+        i18n.t("warnings.summary"),
+        diagnostics.len()
+    ))
+    .size(theme::FONT_CAPTION)
+    .color(t.warn);
     ui.menu_button(title, |ui| {
         ui.set_min_width(420.0);
         ui.set_max_width(560.0);
-        for (module, message) in failures {
+        for item in diagnostics {
+            let color = if item.level.is_error() { t.err } else { t.warn };
             ui.horizontal_top(|ui| {
                 let (bar, _) = ui
                     .allocate_exact_size(Vec2::new(3.0, theme::FONT_CAPTION + 4.0), Sense::hover());
                 ui.painter()
-                    .rect_filled(bar, egui::CornerRadius::same(1), t.warn);
+                    .rect_filled(bar, egui::CornerRadius::same(1), color);
                 ui.add_space(theme::SPACE_2);
-                ui.label(
-                    RichText::new(format!("{module} · {message}"))
+                ui.vertical(|ui| {
+                    ui.label(
+                        RichText::new(format!(
+                            "{} · {}",
+                            i18n.t(item.module_key),
+                            i18n.t(item.reason_key)
+                        ))
                         .size(theme::FONT_CAPTION)
-                        .color(t.text_secondary),
-                );
+                        .color(t.text_primary),
+                    );
+                    if let Some(detail) = &item.detail {
+                        ui.label(
+                            RichText::new(detail)
+                                .size(theme::FONT_CAPTION)
+                                .color(t.text_tertiary),
+                        );
+                    }
+                });
             });
             ui.add_space(theme::SPACE_1);
         }

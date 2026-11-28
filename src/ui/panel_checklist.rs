@@ -4,6 +4,7 @@ use egui::RichText;
 
 use crate::i18n::I18n;
 use crate::state::{AppState, Page};
+use crate::ui::theme;
 use crate::ui::widgets;
 
 struct Row {
@@ -231,6 +232,7 @@ pub fn show(ui: &mut egui::Ui, state: &mut AppState, i18n: I18n) {
     });
     ui.add_space(6.0);
 
+    let diagnostics = state.diagnostics();
     widgets::page_body(ui, |ui| {
         let table_rows: Vec<widgets::Row> = rows
             .iter()
@@ -246,10 +248,21 @@ pub fn show(ui: &mut egui::Ui, state: &mut AppState, i18n: I18n) {
                         widgets::BadgeKind::Warning,
                     )
                 };
+                // 不可用的模块直接说出原因（“此平台不支持”“缺少可选工具”），
+                // 不再只留一个“-”让用户猜。
+                let detail = if row.available {
+                    row.detail.clone()
+                } else {
+                    diagnostics
+                        .iter()
+                        .find(|item| item.module_key == row.page.title_key())
+                        .map(|item| i18n.t(item.reason_key).to_string())
+                        .unwrap_or_else(|| row.detail.clone())
+                };
                 widgets::Row::new(vec![
                     widgets::Cell::Text(i18n.t(row.page.title_key()).to_string()),
                     status,
-                    widgets::Cell::Muted(row.detail.clone()),
+                    widgets::Cell::Muted(detail),
                 ])
             })
             .collect();
@@ -276,27 +289,37 @@ pub fn show(ui: &mut egui::Ui, state: &mut AppState, i18n: I18n) {
         widgets::card(ui, |ui| {
             ui.label(RichText::new(i18n.t("permission.items")).strong());
             for item in &state.permission.items {
-                ui.label(item);
+                ui.label(i18n.t(item));
             }
         });
     }
 
-    if !snapshot.failures.is_empty() {
+    if !diagnostics.is_empty() {
         ui.add_space(8.0);
         widgets::card(ui, |ui| {
-            ui.label(RichText::new(i18n.t("common.warnings")).strong());
-            for failure in &snapshot.failures {
+            ui.label(
+                RichText::new(format!(
+                    "{} ({})",
+                    i18n.t("common.warnings"),
+                    diagnostics.len()
+                ))
+                .strong(),
+            );
+            ui.add_space(theme::SPACE_1);
+            for item in &diagnostics {
+                let kind = if item.level.is_error() {
+                    widgets::BadgeKind::Error
+                } else {
+                    widgets::BadgeKind::Warning
+                };
                 ui.horizontal_wrapped(|ui| {
-                    let kind = if failure.is_warning() {
-                        widgets::BadgeKind::Warning
-                    } else {
-                        widgets::BadgeKind::Error
-                    };
-                    widgets::badge(ui, failure.level.as_str(), kind);
-                    ui.label(
-                        RichText::new(format!("{}: {}", failure.module, failure.message)).weak(),
-                    );
+                    widgets::badge(ui, i18n.t(item.module_key), kind);
+                    ui.label(RichText::new(i18n.t(item.reason_key)).strong());
                 });
+                if let Some(detail) = &item.detail {
+                    ui.label(RichText::new(detail).weak().size(theme::FONT_CAPTION));
+                }
+                ui.add_space(theme::SPACE_1);
             }
         });
     }

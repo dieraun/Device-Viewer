@@ -6,7 +6,7 @@
 use serde::{Deserialize, Serialize};
 use tokio_util::sync::CancellationToken;
 
-use super::error::{QueryError, QueryResult};
+use super::error::QueryResult;
 
 #[derive(Debug, Clone, Serialize, Deserialize, Default)]
 pub struct OpenVxInfo {
@@ -38,8 +38,6 @@ fn platform_query() -> QueryResult<OpenVxInfo> {
 
 #[cfg(not(feature = "openvx"))]
 fn platform_query() -> QueryResult<OpenVxInfo> {
-    Err(QueryError::unsupported(
-        "openvx",
-        "binary was built without the `openvx` feature",
-    ))
+    // 编译期没带这个可选后端属于预期配置，不该当成警告。
+    Ok(OpenVxInfo::default())
 }

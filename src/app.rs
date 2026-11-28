@@ -11,6 +11,7 @@ use tokio::runtime::Runtime;
 use tokio::sync::Semaphore;
 use tokio_util::sync::CancellationToken;
 
+use crate::device_query::live::{LIVE_INTERVAL, LiveMonitor, LiveSample};
 use crate::device_query::opengl;
 use crate::device_query::vulkan::{self, GpuRuntimeStats};
 use crate::device_query::{DEFAULT_MODULE_TIMEOUT, HardwareSnapshot, QueryOptions, collect_all};
@@ -20,6 +21,10 @@ use crate::log;
 use crate::state::{AppState, ThemeMode, UpdateReport, UpdateState};
 use crate::ui;
 use crate::ui::theme;
+
+/// 全量采集（SMART、DXGI、Vulkan 探测）代价高，只能低频重跑；
+/// 每秒变化的使用率由实时线程的 LiveSample 覆盖。
+const AUTO_REFRESH_INTERVAL: Duration = Duration::from_secs(30);
 
 const UPDATE_ENDPOINT: &str = "https://api.github.com/repos/dieraun/Device-Viewer/releases";
 const UPDATE_USER_AGENT: &str = "device-viewer";
@@ -37,6 +42,8 @@ enum QueryEvent {
         generation: u64,
         message: String,
     },
+    /// 实时线程送来的 CPU/内存读数，只覆盖会变化的字段。
+    Live(LiveSample),
     Update {
         generation: u64,
         result: Result<UpdateReport, String>,
@@ -78,6 +85,8 @@ pub struct DeviceViewerApp {
     gpu_inflight: bool,
     last_gpu_poll: Instant,
     last_gpu_sample: Instant,
+    /// 上一次全量采集的起点，用于低频自动刷新。
+    last_auto_refresh: Instant,
     export_open: bool,
     more_open: bool,
     /// 命令面板（Ctrl+K）是否打开。
@@ -107,11 +116,47 @@ enum PaletteAction {
     ToggleTheme,
 }
 
+/// 启动实时采样线程：每秒读一次 CPU/内存并请求重绘。
+///
+/// 线程靠通道断开感知应用退出，不需要额外的停止标志；操作系统拒绝枚举时
+/// 线程直接结束，界面继续显示最近一次完整采集的结果。
+fn spawn_live_thread(sender: std::sync::mpsc::Sender<QueryEvent>, ctx: egui::Context) {
+    let spawned = std::thread::Builder::new()
+        .name("device-viewer-live".to_owned())
+        .spawn(move || {
+            let Some(mut monitor) = LiveMonitor::new() else {
+                log::warn("live sampling is unavailable: the operating system refused enumeration");
+                return;
+            };
+            loop {
+                std::thread::sleep(LIVE_INTERVAL);
+                let sample = monitor.sample();
+                if sender.send(QueryEvent::Live(sample)).is_err() {
+                    break;
+                }
+                // 采样线程不持有界面状态，只能主动叫醒渲染线程。
+                ctx.request_repaint();
+            }
+        });
+    if let Err(error) = spawned {
+        log::warn(format!("cannot start the live sampling thread: {error}"));
+    }
+}
+
 impl DeviceViewerApp {
     pub fn new(creation: &eframe::CreationContext<'_>, portable: bool) -> Self {
-        i18n::install_fonts(&creation.egui_ctx);
         let state = AppState::load(portable);
         log::init(Some(crate::state::log_file(state.settings.portable)));
+        // 字体必须在配置读入之后安装：自定义字体路径存在设置里，
+        // 系统候选字体只是兜底。
+        let font_status =
+            i18n::install_fonts(&creation.egui_ctx, Some(state.settings.font_path.as_str()));
+        if font_status == i18n::FontStatus::CustomMissing {
+            log::warn(format!(
+                "custom font {:?} could not be read; falling back to the system font",
+                state.settings.font_path
+            ));
+        }
         let i18n = I18n::new(state.settings.language);
         let runtime = tokio::runtime::Builder::new_multi_thread()
             .worker_threads(2)
@@ -120,6 +165,8 @@ impl DeviceViewerApp {
             .map_err(|error| format!("cannot start the async runtime: {error}"))
             .ok();
         let (sender, receiver) = std::sync::mpsc::channel();
+        // 实时统计独立于完整采集：慢模块（SMART、DXGI）不能拖住每秒读数。
+        spawn_live_thread(sender.clone(), creation.egui_ctx.clone());
 
         log::info("Device Viewer starting");
 
@@ -138,6 +185,7 @@ impl DeviceViewerApp {
             gpu_inflight: false,
             last_gpu_poll: Instant::now(),
             last_gpu_sample: Instant::now(),
+            last_auto_refresh: Instant::now(),
             export_open: false,
             more_open: false,
             palette_open: false,
@@ -187,6 +235,7 @@ impl DeviceViewerApp {
         self.generation = self.generation.wrapping_add(1);
         let generation = self.generation;
         self.busy = true;
+        self.last_auto_refresh = Instant::now();
         self.started = Instant::now();
         self.gpu_inflight = false;
         log::debug(format!("starting collection generation {generation}"));
@@ -320,6 +369,7 @@ impl DeviceViewerApp {
                     self.gpu_inflight = false;
                     log::warn(format!("live GPU sampling failed: {message}"));
                 }
+                Ok(QueryEvent::Live(sample)) => self.apply_live(&sample),
                 Ok(QueryEvent::Update { generation, result }) => {
                     if generation != self.update_generation {
                         continue;
@@ -341,6 +391,34 @@ impl DeviceViewerApp {
                 Err(TryRecvError::Empty) => break,
                 Err(TryRecvError::Disconnected) => break,
             }
+        }
+    }
+
+    /// 把一次实时读数合并进当前快照。
+    ///
+    /// 只覆盖会变化的计数字段；模块身份、警告和诊断始终来自完整采集结果。
+    /// 完整采集还没回来、或模块当前不可用时静默跳过。
+    fn apply_live(&mut self, sample: &LiveSample) {
+        if let Some(cpu) = self.state.snapshot.cpu.as_mut() {
+            cpu.global_usage_percent = sample.cpu_usage_percent;
+            // 逻辑核心数量可能被调度器或热插拔改变，按较短的序列覆盖。
+            for (core, live) in cpu.cores.iter_mut().zip(sample.cores.iter()) {
+                core.usage_percent = live.usage_percent;
+                core.frequency_mhz = live.frequency_mhz;
+            }
+        }
+        if let Some(memory) = self.state.snapshot.memory.as_mut()
+            && sample.memory_total_bytes > 0
+        {
+            memory.total_bytes = sample.memory_total_bytes;
+            memory.used_bytes = sample.memory_used_bytes;
+            memory.free_bytes = sample.memory_free_bytes;
+            memory.available_bytes = sample.memory_available_bytes;
+            memory.swap_total_bytes = sample.swap_total_bytes;
+            memory.swap_used_bytes = sample.swap_used_bytes;
+        }
+        if let Some(system) = self.state.snapshot.system.as_mut() {
+            system.os.uptime_seconds = Some(sample.uptime_seconds);
         }
     }
 
@@ -834,9 +912,17 @@ impl DeviceViewerApp {
                     );
                     if !self.state.permission.items.is_empty() {
                         ui.label(
-                            egui::RichText::new(self.state.permission.items.join("  ·  "))
-                                .size(theme::FONT_CAPTION)
-                                .color(t.text_tertiary),
+                            egui::RichText::new(
+                                self.state
+                                    .permission
+                                    .items
+                                    .iter()
+                                    .map(|item| self.i18n.t(item))
+                                    .collect::<Vec<_>>()
+                                    .join("  ·  "),
+                            )
+                            .size(theme::FONT_CAPTION)
+                            .color(t.text_tertiary),
                         );
                     }
                     ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
@@ -984,6 +1070,11 @@ impl eframe::App for DeviceViewerApp {
 
         if self.state.ui.request_refresh {
             self.state.ui.request_refresh = false;
+            self.start_query();
+        }
+        // 全量采集低频自动重跑：SMART 与 DXGI 探测既慢又会唤醒磁盘，
+        // 不宜每秒执行；每秒变化的数值由实时线程负责。
+        if !self.busy && self.last_auto_refresh.elapsed() >= AUTO_REFRESH_INTERVAL {
             self.start_query();
         }
         if self.state.ui.request_update_check {

@@ -41,32 +41,32 @@ pub fn show(ui: &mut egui::Ui, state: &mut AppState, i18n: I18n) {
                         .id_salt(format!("opencl-device-{platform_index}-{device_index}"))
                         .default_open(true)
                         .show(ui, |ui| {
-                            ui.horizontal(|ui| {
-                                widgets::metric(
-                                    ui,
-                                    i18n.t("common.compute_units"),
-                                    device.max_compute_units.to_string(),
-                                    None,
-                                );
-                                widgets::metric(
-                                    ui,
-                                    i18n.t("common.frequency"),
-                                    format!("{} MHz", device.max_clock_mhz),
-                                    None,
-                                );
-                                widgets::metric(
-                                    ui,
-                                    i18n.t("common.global_memory"),
-                                    format_bytes(device.global_memory_bytes, units),
-                                    None,
-                                );
-                                widgets::metric(
-                                    ui,
-                                    i18n.t("common.local_memory"),
-                                    format_bytes(device.local_memory_bytes, units),
-                                    None,
-                                );
-                            });
+                            // 自适应网格：窄窗口自动换行，指标不再互相挤压。
+                            widgets::metric_grid(
+                                ui,
+                                &[
+                                    (
+                                        i18n.t("common.compute_units"),
+                                        device.max_compute_units.to_string(),
+                                        None,
+                                    ),
+                                    (
+                                        i18n.t("common.frequency"),
+                                        format!("{} MHz", device.max_clock_mhz),
+                                        None,
+                                    ),
+                                    (
+                                        i18n.t("common.global_memory"),
+                                        format_bytes(device.global_memory_bytes, units),
+                                        None,
+                                    ),
+                                    (
+                                        i18n.t("common.local_memory"),
+                                        format_bytes(device.local_memory_bytes, units),
+                                        None,
+                                    ),
+                                ],
+                            );
                             widgets::kv_grid(
                                 ui,
                                 &format!("opencl-grid-{platform_index}-{device_index}"),

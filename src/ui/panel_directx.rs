@@ -21,6 +21,35 @@ pub fn show(ui: &mut egui::Ui, state: &mut AppState, i18n: I18n) {
         ui.add_space(6.0);
     }
 
+    let unknown = || i18n.t("app.unknown").to_string();
+    widgets::metric_grid(
+        ui,
+        &[
+            (
+                i18n.t("directx.dxgi_version"),
+                info.dxgi_version.clone().unwrap_or_else(&unknown),
+                None,
+            ),
+            (
+                i18n.t("directx.runtime_version"),
+                info.runtime_version.clone().unwrap_or_else(&unknown),
+                None,
+            ),
+            (
+                i18n.t("common.adapters"),
+                info.adapters.len().to_string(),
+                None,
+            ),
+        ],
+    );
+
+    ui.add_space(theme::SPACE_3);
+    let d3d12 =
+        |adapter: &crate::device_query::directx::DirectXAdapter| match adapter.d3d12_supported {
+            Some(true) => i18n.t("directx.d3d12_yes").to_string(),
+            Some(false) => i18n.t("directx.d3d12_no").to_string(),
+            None => unknown(),
+        };
     let rows: Vec<Vec<String>> = info
         .adapters
         .iter()
@@ -28,6 +57,8 @@ pub fn show(ui: &mut egui::Ui, state: &mut AppState, i18n: I18n) {
             vec![
                 adapter.name.clone(),
                 format!("{:04X}:{:04X}", adapter.vendor_id, adapter.device_id),
+                adapter.feature_level.clone().unwrap_or_else(&unknown),
+                d3d12(adapter),
                 format_bytes(adapter.dedicated_video_memory, units),
                 format_bytes(adapter.shared_system_memory, units),
             ]
@@ -46,6 +77,8 @@ pub fn show(ui: &mut egui::Ui, state: &mut AppState, i18n: I18n) {
                 &[
                     i18n.t("common.name"),
                     i18n.t("common.vid_pid"),
+                    i18n.t("directx.feature_level"),
+                    i18n.t("directx.d3d12"),
                     i18n.t("common.vram"),
                     i18n.t("common.shared_memory"),
                 ],
@@ -60,10 +93,10 @@ pub fn show(ui: &mut egui::Ui, state: &mut AppState, i18n: I18n) {
             ui.horizontal(|ui| {
                 ui.label(RichText::new(&adapter.name).size(theme::FONT_H2).strong());
                 if adapter.software {
-                    widgets::badge(ui, "Software", widgets::BadgeKind::Warning);
+                    widgets::badge(ui, i18n.t("common.software"), widgets::BadgeKind::Warning);
                 }
                 if adapter.remote {
-                    widgets::badge(ui, "Remote", widgets::BadgeKind::Warning);
+                    widgets::badge(ui, i18n.t("common.remote"), widgets::BadgeKind::Warning);
                 }
             });
             widgets::kv_grid(
@@ -74,6 +107,11 @@ pub fn show(ui: &mut egui::Ui, state: &mut AppState, i18n: I18n) {
                         "VID:PID",
                         format!("{:04X}:{:04X}", adapter.vendor_id, adapter.device_id),
                     ),
+                    (
+                        i18n.t("directx.feature_level"),
+                        adapter.feature_level.clone().unwrap_or_else(&unknown),
+                    ),
+                    (i18n.t("directx.d3d12"), d3d12(adapter)),
                     (
                         i18n.t("common.vram"),
                         format_bytes(adapter.dedicated_video_memory, units),

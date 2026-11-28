@@ -177,14 +177,30 @@ pub fn cjk_available() -> bool {
     CJK_AVAILABLE.load(std::sync::atomic::Ordering::Relaxed)
 }
 
-/// Installs the UI font stack: Inter when present on the system, egui's
-/// bundled default otherwise, plus a CJK-capable fallback. Best effort: a
-/// missing font only affects glyph coverage, never startup.
-pub fn install_fonts(ctx: &egui::Context) {
+/// 字体安装结果：设置页据此反馈“已应用”或“文件读不到”。
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum FontStatus {
+    /// 使用系统候选字体（没有配置自定义路径）。
+    Default,
+    /// 自定义字体已应用。
+    CustomLoaded,
+    /// 配置了自定义路径，但文件读不出来。
+    CustomMissing,
+}
+
+/// Installs the UI font stack: the user's font when configured, Inter when
+/// present on the system, egui's bundled default otherwise, plus a CJK-capable
+/// fallback. Best effort: a missing font only affects glyph coverage, never
+/// startup.
+pub fn install_fonts(ctx: &egui::Context, custom: Option<&str>) -> FontStatus {
     let ui_candidates: &[&str] = if cfg!(target_os = "windows") {
         &[
             r"C:\Windows\Fonts\Inter-Regular.ttf",
             r"C:\Windows\Fonts\Inter.ttf",
+            // 没有 Inter 时退回系统 UI 字体：Segoe UI 负责西文，中文仍由下面的
+            // 微软雅黑兜底，这才是 Windows 上看起来"原生"的组合。
+            r"C:\Windows\Fonts\segoeui.ttf",
+            r"C:\Windows\Fonts\msyh.ttc",
         ]
     } else if cfg!(target_os = "macos") {
         &[
@@ -221,11 +237,26 @@ pub fn install_fonts(ctx: &egui::Context) {
     };
 
     let mut fonts = egui::FontDefinitions::default();
-    if let Some(bytes) = ui_candidates
-        .iter()
-        .find_map(|path| std::fs::read(Path::new(path)).ok())
-    {
-        let name = "device-viewer-ui".to_owned();
+    let custom_path = custom.map(str::trim).filter(|path| !path.is_empty());
+    let custom_bytes = custom_path.and_then(|path| std::fs::read(Path::new(path)).ok());
+    let status = match (custom_path, custom_bytes.as_ref()) {
+        (None, _) => FontStatus::Default,
+        (Some(_), Some(_)) => FontStatus::CustomLoaded,
+        (Some(_), None) => FontStatus::CustomMissing,
+    };
+    // 用户字体优先；没配置或读不到时才退回系统候选（Inter）。
+    let ui_bytes = custom_bytes.or_else(|| {
+        ui_candidates
+            .iter()
+            .find_map(|path| std::fs::read(Path::new(path)).ok())
+    });
+    if let Some(bytes) = ui_bytes {
+        let name = if status == FontStatus::CustomLoaded {
+            "device-viewer-custom"
+        } else {
+            "device-viewer-ui"
+        }
+        .to_owned();
         fonts.font_data.insert(
             name.clone(),
             std::sync::Arc::new(egui::FontData::from_owned(bytes)),
@@ -251,6 +282,7 @@ pub fn install_fonts(ctx: &egui::Context) {
         CJK_AVAILABLE.store(true, std::sync::atomic::Ordering::Relaxed);
     }
     ctx.set_fonts(fonts);
+    status
 }
 
 const STRINGS: &[(&str, &str, &str)] = &[
@@ -465,6 +497,38 @@ const STRINGS: &[(&str, &str, &str)] = &[
     ("common.model", "Model", "型号"),
     ("common.bios", "BIOS", "BIOS"),
     ("common.os", "Operating system", "操作系统"),
+    (
+        "warn.unsupported",
+        "not available on this platform",
+        "此平台不支持",
+    ),
+    ("warn.permission", "permission denied", "权限不足"),
+    ("warn.timeout", "collection timed out", "采集超时"),
+    ("warn.cancelled", "collection was cancelled", "采集已取消"),
+    ("warn.io", "a system call failed", "系统调用失败"),
+    (
+        "warn.parse",
+        "could not parse the driver data",
+        "无法解析驱动数据",
+    ),
+    (
+        "warn.backend",
+        "the backend reported an error",
+        "后端驱动报错",
+    ),
+    (
+        "warn.not_found",
+        "an optional tool is missing",
+        "缺少可选工具",
+    ),
+    ("warn.internal", "internal error", "内部错误"),
+    ("warn.unknown", "unknown problem", "未知问题"),
+    ("warn.note", "note", "提示"),
+    ("warn.details", "Details", "详情"),
+    ("module.memory", "Memory", "内存"),
+    ("module.motherboard", "Motherboard", "主板"),
+    ("module.system", "System", "系统"),
+    ("module.bandwidth", "Memory bandwidth", "内存带宽"),
     ("warnings.summary", "Warnings", "警告"),
     ("common.name", "Name", "名称"),
     ("common.version", "Version", "版本"),
@@ -488,6 +552,22 @@ const STRINGS: &[(&str, &str, &str)] = &[
     ("cpu.identity", "Processor", "处理器信息"),
     ("cpu.physical", "physical", "物理"),
     ("cpu.logical", "logical", "逻辑"),
+    (
+        "cpu.load_hint",
+        "1 / 5 / 15 minute averages",
+        "1 / 5 / 15 分钟平均值",
+    ),
+    (
+        "cpu.load_windows",
+        "Load average is the length of the runnable queue averaged over 1, 5 and 15 minutes. The Windows kernel does not expose it, so this build falls back to live usage and per-thread bars.",
+        "平均负载是可运行队列在 1、5、15 分钟内的平均长度。Windows 内核不提供该指标，这里改用实时使用率和逐线程占用显示。",
+    ),
+    (
+        "cpu.frequency_range",
+        "Lowest / highest reported clock",
+        "各核心最低 / 最高频率",
+    ),
+    ("cpu.topology", "Topology", "拓扑"),
     ("common.cores", "Cores", "核心"),
     ("common.threads", "Threads", "线程"),
     ("common.frequency", "Frequency", "频率"),
@@ -594,6 +674,18 @@ const STRINGS: &[(&str, &str, &str)] = &[
     ("storage.mount", "Mount point", "挂载点"),
     ("storage.file_system", "File system", "文件系统"),
     ("storage.removable", "Removable", "可移动"),
+    ("storage.volume_label", "Volume label", "卷标"),
+    ("storage.available_space", "Free space", "可用空间"),
+    ("directx.dxgi_version", "DXGI version", "DXGI 版本"),
+    (
+        "directx.runtime_version",
+        "DirectX runtime",
+        "DirectX 运行时",
+    ),
+    ("directx.feature_level", "Feature level", "功能级别"),
+    ("directx.d3d12", "Direct3D 12", "Direct3D 12"),
+    ("directx.d3d12_yes", "Supported", "支持"),
+    ("directx.d3d12_no", "Not supported", "不支持"),
     (
         "pcie.no_devices",
         "No PCI devices were reported",
@@ -1000,6 +1092,26 @@ const STRINGS: &[(&str, &str, &str)] = &[
         "Some hardware details need administrator rights",
         "部分硬件信息需要管理员权限",
     ),
+    (
+        "permission.item_storage",
+        "storage: SMART / NVMe health",
+        "存储：SMART / NVMe 健康状态",
+    ),
+    (
+        "permission.item_pcie",
+        "pcie: low-level PCI configuration",
+        "PCIe：底层 PCI 配置空间",
+    ),
+    (
+        "permission.item_sensors",
+        "sensors: motherboard and fan telemetry",
+        "传感器：主板与风扇遥测",
+    ),
+    (
+        "permission.item_display",
+        "display: full monitor capability data",
+        "显示：完整显示器能力数据",
+    ),
     ("sensors.fans", "Fans", "风扇"),
     ("sensors.temperature", "Temperature", "温度"),
     ("sensors.temperatures", "Temperatures", "温度"),
@@ -1117,4 +1229,32 @@ const STRINGS: &[(&str, &str, &str)] = &[
     ("about.privacy", "Privacy statement", "隐私声明"),
     ("about.disclaimer", "Disclaimer", "免责声明"),
     ("about.contact", "Contact", "联系方式"),
+    ("settings.font", "UI font", "界面字体"),
+    (
+        "settings.font_hint",
+        "Point this at any .ttf or .ttc file to replace the default interface font; leave it empty for the system font. Chinese text still falls back to a system CJK font when the chosen font lacks those glyphs.",
+        "填写任意 .ttf / .ttc 字体文件即可替换默认界面字体；留空则使用系统字体。所选字体不含中文字形时，中文仍会回退到系统中文字体。",
+    ),
+    (
+        "settings.font_placeholder",
+        "e.g. C:/Windows/Fonts/msyh.ttc",
+        "例如 C:/Windows/Fonts/msyh.ttc",
+    ),
+    ("settings.font_apply", "Apply", "应用"),
+    ("settings.font_reset", "Restore default", "恢复默认"),
+    (
+        "toast.font_loaded",
+        "Custom font applied",
+        "已应用自定义字体",
+    ),
+    (
+        "toast.font_missing",
+        "That font file could not be read; the previous font is still in use",
+        "无法读取该字体文件，仍在使用上一个字体",
+    ),
+    (
+        "toast.font_reset",
+        "Default font restored",
+        "已恢复默认字体",
+    ),
 ];

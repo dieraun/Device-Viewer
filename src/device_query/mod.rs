@@ -13,6 +13,7 @@ pub mod cpu;
 pub mod directx;
 pub mod display;
 pub mod error;
+pub mod live;
 pub mod memory;
 pub mod metal;
 pub mod motherboard;

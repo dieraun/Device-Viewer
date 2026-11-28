@@ -3,7 +3,9 @@
 use serde::{Deserialize, Serialize};
 use tokio_util::sync::CancellationToken;
 
-use super::error::{QueryError, QueryResult};
+#[cfg(all(target_os = "macos", not(feature = "metal")))]
+use super::error::QueryError;
+use super::error::QueryResult;
 
 #[derive(Debug, Clone, Serialize, Deserialize, Default)]
 pub struct MetalDevice {
@@ -67,8 +69,6 @@ fn platform_query() -> QueryResult<MetalInfo> {
 
 #[cfg(not(target_os = "macos"))]
 fn platform_query() -> QueryResult<MetalInfo> {
-    Err(QueryError::unsupported(
-        "metal",
-        "Metal is only available on macOS",
-    ))
+    // 平台天生没有 Metal，不是故障：返回“不可用”，不进 failures、不产生警告。
+    Ok(MetalInfo::default())
 }

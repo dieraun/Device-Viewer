@@ -31,7 +31,12 @@ pub fn show(ui: &mut egui::Ui, state: &mut AppState, i18n: I18n) {
             .iter()
             .map(|device| {
                 vec![
-                    device.model.clone().unwrap_or_else(|| device.name.clone()),
+                    device
+                        .mount_point
+                        .clone()
+                        .or_else(|| device.volume_label.clone())
+                        .or_else(|| device.model.clone())
+                        .unwrap_or_else(|| device.name.clone()),
                     device
                         .capacity_bytes
                         .map(|value| format_bytes(value, units))
@@ -57,7 +62,7 @@ pub fn show(ui: &mut egui::Ui, state: &mut AppState, i18n: I18n) {
             i18n,
             markdown_table(
                 &[
-                    i18n.t("storage.model"),
+                    i18n.t("storage.mount"),
                     i18n.t("storage.capacity"),
                     i18n.t("common.protocol"),
                     i18n.t("storage.health"),
@@ -71,12 +76,22 @@ pub fn show(ui: &mut egui::Ui, state: &mut AppState, i18n: I18n) {
     widgets::page_body(ui, |ui| {
         for (index, device) in info.devices.iter().enumerate() {
             widgets::card(ui, |ui| {
+                // 标题用盘符 / 挂载点，卷标（“系统”“win10”）作为副标题；
+                // 之前把卷标当标题，才出现“C 盘显示 win10”的问题。
+                let title = device
+                    .mount_point
+                    .clone()
+                    .or_else(|| device.volume_label.clone())
+                    .or_else(|| device.model.clone())
+                    .unwrap_or_else(|| device.name.clone());
                 ui.horizontal(|ui| {
-                    ui.label(
-                        RichText::new(device.model.clone().unwrap_or_else(|| device.name.clone()))
-                            .size(theme::FONT_H2)
-                            .strong(),
-                    );
+                    ui.label(RichText::new(title.clone()).size(theme::FONT_H2).strong());
+                    // 型号与标题相同（sysinfo 回填时就是盘符）时不再重复显示。
+                    if let Some(model) = &device.model
+                        && *model != title
+                    {
+                        ui.label(RichText::new(model).size(theme::FONT_CAPTION).weak());
+                    }
                     if device.smart_available {
                         widgets::badge(ui, i18n.t("storage.smart"), widgets::BadgeKind::Info);
                     }
@@ -100,7 +115,34 @@ pub fn show(ui: &mut egui::Ui, state: &mut AppState, i18n: I18n) {
                     ui,
                     &format!("storage-grid-{index}"),
                     &[
-                        (i18n.t("storage.model"), device.name.clone()),
+                        (
+                            i18n.t("storage.mount"),
+                            device
+                                .mount_point
+                                .clone()
+                                .unwrap_or_else(|| "-".to_string()),
+                        ),
+                        (
+                            i18n.t("storage.volume_label"),
+                            device
+                                .volume_label
+                                .clone()
+                                .unwrap_or_else(|| "-".to_string()),
+                        ),
+                        (
+                            i18n.t("storage.model"),
+                            // 没有 SMART 时采集器会把盘符当型号，这里不要把它当成型号重复展示。
+                            device
+                                .model
+                                .clone()
+                                .filter(|model| {
+                                    let model = model.trim();
+                                    !model.is_empty()
+                                        && Some(model) != device.mount_point.as_deref()
+                                        && model != device.name
+                                })
+                                .unwrap_or_else(|| "-".to_string()),
+                        ),
                         (
                             i18n.t("common.firmware"),
                             device.firmware.clone().unwrap_or_else(|| "-".to_string()),
@@ -117,6 +159,20 @@ pub fn show(ui: &mut egui::Ui, state: &mut AppState, i18n: I18n) {
                                 .unwrap_or_else(|| "-".to_string()),
                         ),
                         (
+                            i18n.t("storage.available_space"),
+                            device
+                                .available_bytes
+                                .map(|value| format_bytes(value, units))
+                                .unwrap_or_else(|| "-".to_string()),
+                        ),
+                        (
+                            i18n.t("storage.file_system"),
+                            device
+                                .file_system
+                                .clone()
+                                .unwrap_or_else(|| "-".to_string()),
+                        ),
+                        (
                             i18n.t("common.protocol"),
                             device.protocol.clone().unwrap_or_else(|| "-".to_string()),
                         ),
@@ -127,15 +183,16 @@ pub fn show(ui: &mut egui::Ui, state: &mut AppState, i18n: I18n) {
                                 .clone()
                                 .unwrap_or_else(|| "-".to_string()),
                         ),
-                        (
-                            i18n.t("storage.mount"),
-                            device
-                                .mount_point
-                                .clone()
-                                .unwrap_or_else(|| "-".to_string()),
-                        ),
                     ],
                 );
+
+                if let (Some(total), Some(free)) = (device.capacity_bytes, device.available_bytes)
+                    && total > 0
+                {
+                    let used = total.saturating_sub(free) as f64 / total as f64 * 100.0;
+                    ui.add_space(theme::SPACE_2);
+                    widgets::percent_bar(ui, i18n.t("storage.used"), used as f32);
+                }
 
                 if let Some(health) = &device.health {
                     ui.add_space(6.0);

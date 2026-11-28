@@ -38,6 +38,12 @@ pub struct StorageDevice {
     pub device_type: Option<String>,
     pub mount_point: Option<String>,
     pub file_system: Option<String>,
+    /// 卷标（Windows 的“系统”“win10”这类名字），和挂载点分开保存。
+    #[serde(default)]
+    pub volume_label: Option<String>,
+    /// 卷的剩余可用空间；SMART 只给物理容量，所以这里是 Option。
+    #[serde(default)]
+    pub available_bytes: Option<u64>,
     pub removable: Option<bool>,
     pub smart_available: bool,
     pub health: Option<StorageHealth>,
@@ -85,20 +91,44 @@ pub async fn query(cancel: &CancellationToken) -> QueryResult<StorageInfo> {
 
         if let Ok(disks) = Disks::new_with_refreshed_list() {
             for disk in &disks {
-                let name = disk.name().to_string_lossy().into_owned();
-                if devices.iter().any(|device| device.name == name) {
+                let mount = disk.mount_point().to_string_lossy().into_owned();
+                let label = disk.name().to_string_lossy().into_owned();
+                // 同一个卷可能已经被 SMART 记录过，按挂载点或卷标去重。
+                if devices.iter().any(|device| {
+                    device.mount_point.as_deref() == Some(mount.as_str())
+                        || (!label.trim().is_empty()
+                            && device.volume_label.as_deref() == Some(label.as_str()))
+                }) {
                     continue;
                 }
                 devices.push(StorageDevice {
-                    name,
+                    name: mount.clone(),
+                    mount_point: Some(mount),
+                    volume_label: non_empty(label),
+                    available_bytes: Some(disk.available_space()),
                     capacity_bytes: Some(disk.total_space()),
                     device_type: Some(disk.kind().to_string()),
-                    mount_point: Some(disk.mount_point().to_string_lossy().into_owned()),
                     file_system: Some(disk.file_system().to_string_lossy().into_owned()),
                     removable: Some(disk.is_removable()),
                     smart_available: false,
                     ..StorageDevice::default()
                 });
+            }
+            // SMART 只有物理盘容量，把容量吻合的卷的信息补到那块盘上，
+            // 这样一块 SSD 只出现一次，同时带上盘符和剩余空间。
+            for disk in &disks {
+                if let Some(device) = devices.iter_mut().find(|device| {
+                    device.mount_point.is_none()
+                        && device.capacity_bytes == Some(disk.total_space())
+                }) {
+                    device.mount_point = Some(disk.mount_point().to_string_lossy().into_owned());
+                    device.available_bytes = Some(disk.available_space());
+                    device.volume_label = non_empty(disk.name().to_string_lossy().into_owned());
+                    if device.file_system.is_none() {
+                        device.file_system =
+                            Some(disk.file_system().to_string_lossy().into_owned());
+                    }
+                }
             }
         }
 

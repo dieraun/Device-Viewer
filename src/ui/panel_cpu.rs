@@ -16,13 +16,20 @@ pub fn show(ui: &mut egui::Ui, state: &mut AppState, i18n: I18n) {
     };
     let t = theme::theme(ui);
 
-    let frequency = cpu
-        .cores
-        .iter()
-        .map(|core| core.frequency_mhz)
-        .max()
+    let min_frequency = cpu.cores.iter().map(|core| core.frequency_mhz).min();
+    let max_frequency = cpu.cores.iter().map(|core| core.frequency_mhz).max();
+    let frequency = max_frequency
         .map(format_frequency)
         .unwrap_or_else(|| i18n.t("app.n_a").to_string());
+    // 只有各核频率确实不同时才展示区间，否则“1.60 GHz – 1.60 GHz”只是噪声。
+    let frequency_detail = match (min_frequency, max_frequency) {
+        (Some(min), Some(max)) if min != max => Some(format!(
+            "{} – {}",
+            format_frequency(min),
+            format_frequency(max)
+        )),
+        _ => None,
+    };
     let load = cpu.load_average;
     widgets::metric_grid(
         ui,
@@ -43,15 +50,36 @@ pub fn show(ui: &mut egui::Ui, state: &mut AppState, i18n: I18n) {
                 format!("{:.1}%", cpu.global_usage_percent),
                 None,
             ),
-            (i18n.t("common.frequency"), frequency, None),
+            (
+                i18n.t("common.frequency"),
+                frequency,
+                frequency_detail.clone(),
+            ),
             (
                 i18n.t("common.load_average"),
                 load.map(|load| format!("{:.2}", load[0]))
                     .unwrap_or_else(|| i18n.t("app.n_a").to_string()),
-                load.map(|load| format!("{:.2} / {:.2}", load[1], load[2])),
+                load.map(|load| {
+                    format!(
+                        "{}: {:.2} / {:.2}",
+                        i18n.t("cpu.load_hint"),
+                        load[1],
+                        load[2]
+                    )
+                }),
             ),
         ],
     );
+
+    // Windows 内核不统计 Unix 平均负载，与其只写“不适用”，不如把原因讲清楚。
+    if load.is_none() {
+        ui.add_space(theme::SPACE_2);
+        ui.label(
+            RichText::new(i18n.t("cpu.load_windows"))
+                .size(theme::FONT_CAPTION)
+                .color(t.text_tertiary),
+        );
+    }
 
     widgets::section(ui, i18n.t("cpu.identity"));
     widgets::kv_grid(
@@ -61,6 +89,26 @@ pub fn show(ui: &mut egui::Ui, state: &mut AppState, i18n: I18n) {
             (i18n.t("common.vendor"), cpu.vendor.clone()),
             (i18n.t("common.model"), cpu.brand.clone()),
             (i18n.t("common.architecture"), cpu.architecture.clone()),
+            (
+                i18n.t("cpu.topology"),
+                format!(
+                    "{} {} · {} {}",
+                    cpu.physical_cores,
+                    i18n.t("cpu.physical"),
+                    cpu.logical_cores,
+                    i18n.t("cpu.logical")
+                ),
+            ),
+            (
+                i18n.t("cpu.frequency_range"),
+                match (min_frequency, max_frequency) {
+                    (Some(min), Some(max)) if min == max => format_frequency(min),
+                    (Some(min), Some(max)) => {
+                        format!("{} – {}", format_frequency(min), format_frequency(max))
+                    }
+                    _ => i18n.t("app.n_a").to_string(),
+                },
+            ),
         ],
     );
 

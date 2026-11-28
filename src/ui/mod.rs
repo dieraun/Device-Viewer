@@ -32,20 +32,15 @@ use crate::state::{AppState, Page};
 pub fn show_page(ui: &mut egui::Ui, state: &mut AppState, i18n: I18n) {
     // 标题由顶栏吸顶显示；这里只画当前分区的页签，再画唯一的一层滚动。
     let section = sidebar::section_of(state.settings.page);
-    let failures: Vec<(String, String)> = state
-        .snapshot
-        .failures
-        .iter()
-        .map(|failure| (failure.module.to_string(), failure.message.clone()))
-        .collect();
-    let total_warnings = state.total_warnings();
+    // 徽标和清单页读同一份诊断，条数天然一致。
+    let diagnostics = state.diagnostics();
     let mut selected = None;
     ui.horizontal(|ui| {
         if section.pages.len() > 1 {
             selected = widgets::tabs(ui, i18n, section.pages, state.settings.page);
         }
         ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-            widgets::warnings_chip(ui, i18n, &failures, total_warnings);
+            widgets::warnings_chip(ui, i18n, &diagnostics);
         });
     });
     if let Some(page) = selected {

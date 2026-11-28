@@ -2,8 +2,11 @@
 
 // 每个 `unsafe` 都必须写明前置条件；缺少说明会在 CI 的 `-D warnings` 下直接失败。
 #![deny(clippy::undocumented_unsafe_blocks)]
+// 发布版是纯 GUI 子系统：双击不弹控制台。批处理模式在 main 里自己附着控制台。
+#![cfg_attr(all(windows, not(debug_assertions)), windows_subsystem = "windows")]
 
 mod app;
+mod console;
 mod device_query;
 mod export;
 mod i18n;
@@ -60,6 +63,9 @@ struct Cli {
 }
 
 fn main() -> ExitCode {
+    // 必须在任何 stdout/stderr 使用之前：std 会缓存标准句柄。
+    console::prepare_for_args();
+
     let cli = match parse_args(std::env::args().skip(1)) {
         Ok(cli) => cli,
         Err(error) => {
@@ -103,6 +109,7 @@ fn main() -> ExitCode {
         match app::run(cli.portable) {
             Ok(()) => ExitCode::SUCCESS,
             Err(error) => {
+                console::prepare_for_error();
                 eprintln!("error: failed to start the GUI: {error}");
                 ExitCode::FAILURE
             }

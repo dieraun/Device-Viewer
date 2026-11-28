@@ -12,7 +12,9 @@ use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 
 use serde::{Deserialize, Serialize};
 
-use crate::device_query::{GpuRuntimeStats, HardwareSnapshot, UnitSystem};
+use crate::device_query::{
+    GpuRuntimeStats, HardwareSnapshot, NOT_ENABLED_MESSAGE, QueryErrorKind, UnitSystem,
+};
 use crate::i18n::LanguagePreference;
 
 pub const CONFIG_FILE: &str = "device-viewer.json";
@@ -166,6 +168,9 @@ pub struct Settings {
     pub favorite_extensions: Vec<String>,
     pub auto_check_updates: bool,
     pub include_prerelease: bool,
+    /// 用户自定义的界面字体文件路径；空字符串表示使用系统候选字体。
+    #[serde(default)]
+    pub font_path: String,
     /// Unix 毫秒时间戳：最近一次向 GitHub 发起更新检查的时刻。
     ///
     /// 未认证的 GitHub API 每小时只允许 60 次请求，所以启动时的自动检查必须
@@ -188,6 +193,7 @@ impl Default for Settings {
             favorite_extensions: Vec::new(),
             auto_check_updates: true,
             include_prerelease: false,
+            font_path: String::new(),
             last_update_check_ms: 0,
         }
     }
@@ -290,7 +296,8 @@ impl Default for GpuSample {
 #[derive(Debug, Clone)]
 pub struct PermissionReport {
     pub elevated: bool,
-    pub items: Vec<String>,
+    /// i18n 键而不是英文原文：界面语言是中文时不应该再冒出英文条目。
+    pub items: Vec<&'static str>,
 }
 
 impl PermissionReport {
@@ -298,10 +305,10 @@ impl PermissionReport {
         let elevated = is_elevated();
         let mut items = Vec::new();
         if !elevated {
-            items.push("storage: SMART / NVMe health".to_string());
-            items.push("pcie: low-level PCI configuration".to_string());
-            items.push("sensors: motherboard and fan telemetry".to_string());
-            items.push("display: full monitor capability data".to_string());
+            items.push("permission.item_storage");
+            items.push("permission.item_pcie");
+            items.push("permission.item_sensors");
+            items.push("permission.item_display");
         }
         Self { elevated, items }
     }
@@ -807,70 +814,141 @@ impl AppState {
         }
     }
 
-    pub fn total_warnings(&self) -> usize {
-        let module_warnings = [
-            self.snapshot.cpu.as_ref().map(|value| value.warnings.len()),
-            self.snapshot
-                .memory
-                .as_ref()
-                .map(|value| value.warnings.len()),
-            self.snapshot
-                .pcie
-                .as_ref()
-                .map(|value| value.warnings.len()),
-            self.snapshot
-                .vulkan
-                .as_ref()
-                .map(|value| value.warnings.len()),
-            self.snapshot
-                .opengl
-                .as_ref()
-                .map(|value| value.warnings.len()),
-            self.snapshot
-                .opencl
-                .as_ref()
-                .map(|value| value.warnings.len()),
-            self.snapshot.npu.as_ref().map(|value| value.warnings.len()),
-            self.snapshot.usb.as_ref().map(|value| value.warnings.len()),
-            self.snapshot
-                .storage
-                .as_ref()
-                .map(|value| value.warnings.len()),
-            self.snapshot
-                .motherboard
-                .as_ref()
-                .map(|value| value.warnings.len()),
-            self.snapshot
-                .display
-                .as_ref()
-                .map(|value| value.warnings.len()),
-            self.snapshot
-                .directx
-                .as_ref()
-                .map(|value| value.warnings.len()),
-            self.snapshot
-                .metal
-                .as_ref()
-                .map(|value| value.warnings.len()),
-            self.snapshot
-                .openvx
-                .as_ref()
-                .map(|value| value.warnings.len()),
-            self.snapshot
-                .system
-                .as_ref()
-                .map(|value| value.warnings.len()),
-            self.snapshot
-                .sensors
-                .as_ref()
-                .map(|value| value.warnings.len()),
-            self.snapshot
-                .bandwidth
-                .as_ref()
-                .map(|value| value.warnings.len()),
-        ];
-        module_warnings.into_iter().flatten().sum::<usize>() + self.snapshot.warning_count()
+    /// 采集过程中产生的全部诊断信息。
+    ///
+    /// 页签行的警告徽标、页脚计数和清单页的列表都读这一个函数，所以
+    /// “显示 6 条却只列出 3 条”这种不一致不会再出现；原因用 i18n key
+    /// 表示，原始英文消息只作为详情展示。
+    pub fn diagnostics(&self) -> Vec<Diagnostic> {
+        let mut items = Vec::new();
+        for failure in &self.snapshot.failures {
+            // 取消是刷新过程中的正常现象，“模块未启用”是调用方的选择，
+            // 两者都不是缺陷，不该出现在警告里。
+            if failure.kind == QueryErrorKind::Cancelled || failure.message == NOT_ENABLED_MESSAGE {
+                continue;
+            }
+            items.push(Diagnostic {
+                module_key: module_i18n_key(&failure.module),
+                reason_key: reason_i18n_key(failure.kind),
+                level: if failure.is_warning() {
+                    DiagnosticLevel::Warning
+                } else {
+                    DiagnosticLevel::Error
+                },
+                detail: Some(match &failure.detail {
+                    Some(detail) => format!("{} ({detail})", failure.message),
+                    None => failure.message.clone(),
+                }),
+            });
+        }
+        for (module_key, note) in module_notes(&self.snapshot) {
+            items.push(Diagnostic {
+                module_key,
+                reason_key: "warn.note",
+                level: DiagnosticLevel::Warning,
+                detail: Some(note),
+            });
+        }
+        items
     }
+
+    pub fn total_warnings(&self) -> usize {
+        self.diagnostics().len()
+    }
+}
+
+/// 一条展示给用户的诊断信息。
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct Diagnostic {
+    /// 模块标题的 i18n key（nav.* 或 module.*）。
+    pub module_key: &'static str,
+    /// 原因的 i18n key（warn.*）。
+    pub reason_key: &'static str,
+    pub level: DiagnosticLevel,
+    /// 原始消息，通常来自驱动或操作系统，保留原文便于排查。
+    pub detail: Option<String>,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum DiagnosticLevel {
+    Warning,
+    Error,
+}
+
+impl DiagnosticLevel {
+    pub const fn is_error(self) -> bool {
+        matches!(self, Self::Error)
+    }
+}
+
+/// 稳定模块名 → 标题 i18n key。
+fn module_i18n_key(module: &str) -> &'static str {
+    match module {
+        "cpu" => "nav.cpu",
+        "memory" => "module.memory",
+        "pcie" => "nav.pcie",
+        "vulkan" => "nav.vulkan",
+        "opengl" => "nav.opengl",
+        "opencl" => "nav.opencl",
+        "npu" => "nav.npu",
+        "usb" => "nav.usb",
+        "storage" => "nav.storage",
+        "motherboard" => "module.motherboard",
+        "display" => "nav.display",
+        "directx" => "nav.directx",
+        "metal" => "nav.metal",
+        "openvx" => "nav.openvx",
+        "system" => "module.system",
+        "sensors" => "nav.sensors",
+        "bandwidth" => "module.bandwidth",
+        _ => "nav.checklist",
+    }
+}
+
+/// 失败种类 → 原因 i18n key。
+fn reason_i18n_key(kind: QueryErrorKind) -> &'static str {
+    match kind {
+        QueryErrorKind::Unsupported => "warn.unsupported",
+        QueryErrorKind::PermissionDenied => "warn.permission",
+        QueryErrorKind::Timeout => "warn.timeout",
+        QueryErrorKind::Cancelled => "warn.cancelled",
+        QueryErrorKind::Io => "warn.io",
+        QueryErrorKind::Parse => "warn.parse",
+        QueryErrorKind::Backend => "warn.backend",
+        QueryErrorKind::NotFound => "warn.not_found",
+        QueryErrorKind::Internal => "warn.internal",
+        QueryErrorKind::Unknown => "warn.unknown",
+    }
+}
+
+/// 各模块自己记录的提示（例如缺少 smartctl、SMBIOS 读不到内存条）。
+fn module_notes(snapshot: &HardwareSnapshot) -> Vec<(&'static str, String)> {
+    let mut notes = Vec::new();
+    macro_rules! collect {
+        ($module:expr, $field:expr) => {
+            if let Some(value) = $field {
+                notes.extend(value.warnings.iter().map(|note| ($module, note.clone())));
+            }
+        };
+    }
+    collect!("nav.cpu", snapshot.cpu.as_ref());
+    collect!("module.memory", snapshot.memory.as_ref());
+    collect!("nav.pcie", snapshot.pcie.as_ref());
+    collect!("nav.vulkan", snapshot.vulkan.as_ref());
+    collect!("nav.opengl", snapshot.opengl.as_ref());
+    collect!("nav.opencl", snapshot.opencl.as_ref());
+    collect!("nav.npu", snapshot.npu.as_ref());
+    collect!("nav.usb", snapshot.usb.as_ref());
+    collect!("nav.storage", snapshot.storage.as_ref());
+    collect!("module.motherboard", snapshot.motherboard.as_ref());
+    collect!("nav.display", snapshot.display.as_ref());
+    collect!("nav.directx", snapshot.directx.as_ref());
+    collect!("nav.metal", snapshot.metal.as_ref());
+    collect!("nav.openvx", snapshot.openvx.as_ref());
+    collect!("module.system", snapshot.system.as_ref());
+    collect!("nav.sensors", snapshot.sensors.as_ref());
+    collect!("module.bandwidth", snapshot.bandwidth.as_ref());
+    notes
 }
 
 pub fn default_config_dir() -> PathBuf {

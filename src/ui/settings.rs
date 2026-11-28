@@ -3,7 +3,7 @@
 use egui::RichText;
 
 use crate::device_query::UnitSystem;
-use crate::i18n::{I18n, LanguagePreference};
+use crate::i18n::{FontStatus, I18n, LanguagePreference};
 use crate::state::{AppState, Page, Settings, ThemeMode, UpdateState, format_timestamp};
 use crate::ui::theme;
 use crate::ui::widgets::{self, BadgeKind, badge};
@@ -87,6 +87,46 @@ pub fn show(ui: &mut egui::Ui, state: &mut AppState, i18n: I18n) {
                             .color(theme::theme(ui).err),
                     );
                 }
+
+                ui.add_space(theme::SECTION_GAP);
+                ui.label(RichText::new(i18n.t("settings.font")).strong());
+                ui.label(
+                    RichText::new(i18n.t("settings.font_hint"))
+                        .weak()
+                        .size(theme::FONT_CAPTION),
+                );
+                ui.horizontal(|ui| {
+                    let response = ui.add(
+                        egui::TextEdit::singleline(&mut state.settings.font_path)
+                            .hint_text(i18n.t("settings.font_placeholder"))
+                            .desired_width(280.0),
+                    );
+                    // 路径改动只记进配置；“应用”才重建字体表：每敲一个字符
+                    // 就重装字体会清空纹理缓存，输入会明显卡顿。
+                    if response.changed() {
+                        state.mark_dirty();
+                    }
+                    if ui.button(i18n.t("settings.font_apply")).clicked() {
+                        let status =
+                            crate::i18n::install_fonts(ui.ctx(), Some(&state.settings.font_path));
+                        state.mark_dirty();
+                        match status {
+                            FontStatus::CustomLoaded => {
+                                state.ui.notify_success(i18n.t("toast.font_loaded"));
+                            }
+                            FontStatus::CustomMissing => {
+                                state.ui.notify_error(i18n.t("toast.font_missing"));
+                            }
+                            FontStatus::Default => {}
+                        }
+                    }
+                    if ui.button(i18n.t("settings.font_reset")).clicked() {
+                        state.settings.font_path.clear();
+                        crate::i18n::install_fonts(ui.ctx(), None);
+                        state.mark_dirty();
+                        state.ui.notify(i18n.t("toast.font_reset"));
+                    }
+                });
 
                 ui.add_space(theme::SECTION_GAP);
                 ui.label(RichText::new(i18n.t("settings.units")).strong());
