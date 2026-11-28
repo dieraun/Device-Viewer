@@ -753,6 +753,20 @@ pub fn empty(ui: &mut egui::Ui, text: impl Into<String>) {
     let _ = empty_state(ui, t, Icon::Info, &text, "", None);
 }
 
+/// A muted, wrapped explanation line. Used to say why a value is missing
+/// instead of leaving a bare em dash or N/A on screen.
+pub fn hint(ui: &mut egui::Ui, text: impl Into<String>) {
+    let t = theme::theme(ui);
+    ui.add(
+        egui::Label::new(
+            RichText::new(text.into())
+                .size(theme::FONT_CAPTION)
+                .color(t.text_tertiary),
+        )
+        .wrap(),
+    );
+}
+
 /// A secondary warning block: caption text with a 3 px tone bar on the left.
 pub fn warning_list(ui: &mut egui::Ui, i18n: I18n, warnings: &[String]) {
     let t = theme::theme(ui);

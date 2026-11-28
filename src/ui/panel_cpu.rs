@@ -48,7 +48,7 @@ pub fn show(ui: &mut egui::Ui, state: &mut AppState, i18n: I18n) {
             (
                 i18n.t("common.usage"),
                 format!("{:.1}%", cpu.global_usage_percent),
-                None,
+                Some(i18n.t("cpu.metrics_explain").to_string()),
             ),
             (
                 i18n.t("common.frequency"),
@@ -58,28 +58,30 @@ pub fn show(ui: &mut egui::Ui, state: &mut AppState, i18n: I18n) {
             (
                 i18n.t("common.load_average"),
                 load.map(|load| format!("{:.2}", load[0]))
-                    .unwrap_or_else(|| i18n.t("app.n_a").to_string()),
-                load.map(|load| {
-                    format!(
-                        "{}: {:.2} / {:.2}",
+                    .unwrap_or_else(|| i18n.t("cpu.load_windows_value").to_string()),
+                Some(match load {
+                    Some(load) => format!(
+                        "{}: {:.2} / {:.2} · {}",
                         i18n.t("cpu.load_hint"),
                         load[1],
-                        load[2]
-                    )
+                        load[2],
+                        i18n.t("cpu.load_windows_detail")
+                    ),
+                    None => i18n.t("cpu.load_windows_detail").to_string(),
                 }),
             ),
         ],
     );
 
-    // Windows 内核不统计 Unix 平均负载，与其只写“不适用”，不如把原因讲清楚。
-    if load.is_none() {
-        ui.add_space(theme::SPACE_2);
-        ui.label(
-            RichText::new(i18n.t("cpu.load_windows"))
-                .size(theme::FONT_CAPTION)
-                .color(t.text_tertiary),
-        );
-    }
+    // 平均负载在 Windows 上不存在，把“为什么没有”和“看什么替代”固定展示出来。
+    ui.add_space(theme::SPACE_2);
+    widgets::card(ui, |ui| {
+        ui.label(RichText::new(i18n.t("cpu.summary")).strong());
+        ui.add_space(theme::SPACE_1);
+        widgets::hint(ui, i18n.t("cpu.metrics_explain"));
+        ui.add_space(theme::SPACE_1);
+        widgets::hint(ui, i18n.t("cpu.load_explain"));
+    });
 
     widgets::section(ui, i18n.t("cpu.identity"));
     widgets::kv_grid(
@@ -106,7 +108,7 @@ pub fn show(ui: &mut egui::Ui, state: &mut AppState, i18n: I18n) {
                     (Some(min), Some(max)) => {
                         format!("{} – {}", format_frequency(min), format_frequency(max))
                     }
-                    _ => i18n.t("app.n_a").to_string(),
+                    _ => i18n.t("value.not_provided").to_string(),
                 },
             ),
         ],

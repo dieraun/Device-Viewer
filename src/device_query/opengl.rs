@@ -81,6 +81,26 @@ pub fn query_from_context(gl: &glow::Context) -> OpenGlInfo {
                 "MAX_COMBINED_TEXTURE_IMAGE_UNITS",
                 glow::MAX_COMBINED_TEXTURE_IMAGE_UNITS,
             ),
+            ("MAX_3D_TEXTURE_SIZE", glow::MAX_3D_TEXTURE_SIZE),
+            ("MAX_ARRAY_TEXTURE_LAYERS", glow::MAX_ARRAY_TEXTURE_LAYERS),
+            ("MAX_COLOR_ATTACHMENTS", glow::MAX_COLOR_ATTACHMENTS),
+            ("MAX_DRAW_BUFFERS", glow::MAX_DRAW_BUFFERS),
+            ("MAX_ELEMENTS_INDICES", glow::MAX_ELEMENTS_INDICES),
+            ("MAX_ELEMENTS_VERTICES", glow::MAX_ELEMENTS_VERTICES),
+            (
+                "MAX_FRAGMENT_UNIFORM_COMPONENTS",
+                glow::MAX_FRAGMENT_UNIFORM_COMPONENTS,
+            ),
+            ("MAX_SAMPLES", glow::MAX_SAMPLES),
+            (
+                "MAX_UNIFORM_BUFFER_BINDINGS",
+                glow::MAX_UNIFORM_BUFFER_BINDINGS,
+            ),
+            ("MAX_UNIFORM_BLOCK_SIZE", glow::MAX_UNIFORM_BLOCK_SIZE),
+            (
+                "MAX_VERTEX_UNIFORM_COMPONENTS",
+                glow::MAX_VERTEX_UNIFORM_COMPONENTS,
+            ),
         ];
         for (name, key) in limits {
             info.limits

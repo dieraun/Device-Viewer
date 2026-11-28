@@ -118,6 +118,7 @@ pub struct FilterSettings {
     pub pcie_text: String,
     pub usb_text: String,
     pub extension_text: String,
+    pub opengl_extension_text: String,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Default)]

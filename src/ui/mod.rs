@@ -88,10 +88,13 @@ fn overview(ui: &mut egui::Ui, state: &AppState, i18n: I18n) {
         .as_ref()
         .map(|cpu| format!("{:.1}%", cpu.global_usage_percent))
         .unwrap_or_else(|| i18n.t("app.n_a").to_string());
-    let cpu_detail = snapshot
-        .cpu
-        .as_ref()
-        .map(|cpu| format!("{} / {} threads", cpu.brand, cpu.logical_cores));
+    let cpu_detail = snapshot.cpu.as_ref().map(|cpu| {
+        let topology =
+            i18n.t("cpu.threads_detail")
+                .replacen("{}", &cpu.logical_cores.to_string(), 1);
+        let topology = topology.replacen("{}", &cpu.physical_cores.to_string(), 1);
+        format!("{} · {topology}", cpu.brand)
+    });
 
     let (memory_value, memory_detail) = snapshot
         .memory
@@ -112,16 +115,17 @@ fn overview(ui: &mut egui::Ui, state: &AppState, i18n: I18n) {
         .vulkan
         .as_ref()
         .is_none_or(|info| !info.available || info.devices.is_empty());
-    let gpu_value = state
+    let gpu_utilization = state
         .gpu_runtime
         .first()
-        .and_then(|gpu| gpu.utilization_percent)
+        .and_then(|gpu| gpu.utilization_percent);
+    let gpu_value = gpu_utilization
         .map(|value| format!("{value:.1}%"))
         .unwrap_or_else(|| {
             if no_vulkan {
                 i18n.t("gpu.no_vulkan_support").to_string()
             } else {
-                i18n.t("app.n_a").to_string()
+                i18n.t("overview.gpu_usage_missing_value").to_string()
             }
         });
     let gpu_detail = state
@@ -156,6 +160,10 @@ fn overview(ui: &mut egui::Ui, state: &AppState, i18n: I18n) {
         ],
     );
 
+    if gpu_utilization.is_none() && !no_vulkan {
+        ui.add_space(theme::SPACE_2);
+        widgets::hint(ui, i18n.t("overview.gpu_missing_explain"));
+    }
     ui.add_space(theme::SPACE_6);
     hairline(ui, &t);
 
@@ -257,7 +265,7 @@ fn overview(ui: &mut egui::Ui, state: &AppState, i18n: I18n) {
         let value = |speed: Option<f64>| {
             speed
                 .map(|value| format!("{value:.1} MB/s"))
-                .unwrap_or_else(|| i18n.t("app.n_a").to_string())
+                .unwrap_or_else(|| i18n.t("overview.bandwidth_not_measured").to_string())
         };
         widgets::kv_grid(
             ui,
@@ -277,6 +285,8 @@ fn overview(ui: &mut egui::Ui, state: &AppState, i18n: I18n) {
                 ),
             ],
         );
+        ui.add_space(theme::SPACE_1);
+        widgets::hint(ui, i18n.t("overview.bandwidth_explain"));
     } else {
         widgets::empty(ui, i18n.t("overview.no_data"));
     }

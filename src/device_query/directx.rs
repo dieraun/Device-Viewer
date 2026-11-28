@@ -12,6 +12,13 @@ pub struct DirectXAdapter {
     pub name: String,
     pub vendor_id: u32,
     pub device_id: u32,
+    /// 适配器 LUID（高 32 位 HighPart，低 32 位 LowPart），便于和其他 Windows 组件对应。
+    #[serde(default)]
+    pub luid: u64,
+    #[serde(default)]
+    pub subsystem_id: u32,
+    #[serde(default)]
+    pub revision: u32,
     pub dedicated_video_memory: u64,
     pub dedicated_system_memory: u64,
     pub shared_system_memory: u64,
@@ -111,6 +118,10 @@ mod win {
                             name: wide_to_string(&desc.Description),
                             vendor_id: desc.VendorId,
                             device_id: desc.DeviceId,
+                            luid: (u64::from(desc.AdapterLuid.HighPart as u32) << 32)
+                                | u64::from(desc.AdapterLuid.LowPart),
+                            subsystem_id: desc.SubSysId,
+                            revision: desc.Revision,
                             dedicated_video_memory: desc.DedicatedVideoMemory as u64,
                             dedicated_system_memory: desc.DedicatedSystemMemory as u64,
                             shared_system_memory: desc.SharedSystemMemory as u64,
