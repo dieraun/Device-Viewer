@@ -6,7 +6,7 @@ Rust · eframe/egui · 异步并行采集 · GUI + CLI · Windows / Linux / macO
 
 [🇨🇳 中文](#中文) · [🇬🇧 English](#english)
 
-**当前版本 Current release: 1.4.0** · [发行说明 Release notes](RELEASE_NOTES_1.4.0.md)
+**当前版本 Current release: 1.5.0** · [发行说明 Release notes](RELEASE_NOTES_1.5.0.md)
 
 > 本项目采用 **MIT OR Apache-2.0 双许可**，是 OSI 认可的开源软件。你可以任选其一使用、修改、分发，包括商业用途与闭源集成；只需保留版权声明与许可文本。详见 [LICENSE-MIT](LICENSE-MIT) 与 [LICENSE-APACHE](LICENSE-APACHE)。
 
