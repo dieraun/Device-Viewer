@@ -304,11 +304,15 @@ async fn core_modules_return_structured_results() {
 
 #[cfg(not(target_os = "windows"))]
 #[tokio::test]
-async fn directx_is_unsupported_off_windows() {
+async fn directx_is_quiet_off_windows() {
     let cancel = CancellationToken::new();
-    let error = device_query::directx::query(&cancel)
+    let info = device_query::directx::query(&cancel)
         .await
-        .expect_err("DirectX must be unsupported off Windows");
-    assert_eq!(error.kind, QueryErrorKind::Unsupported);
-    assert!(error.is_warning());
+        .expect("DirectX must report a structured result off Windows");
+    assert!(!info.available);
+    assert!(
+        info.warnings.is_empty(),
+        "a platform without DirectX must stay quiet"
+    );
+    assert!(info.adapters.is_empty());
 }
